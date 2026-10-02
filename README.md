@@ -1,10 +1,10 @@
 # first-pr-practice
 
-A tiny practise project for learning how to open a pull request.
+A tiny practice project for learning how to open a pull request.
 
 ## What's inside
 
-- `calculator.py` — a few simple arithmatic helpers
+- `calculator.py` — a few simple arithmetic helpers
 - `tests/` — unit tests that run with Python's built-in `unittest`
 
 ## Running the tests
@@ -13,4 +13,4 @@ A tiny practise project for learning how to open a pull request.
 python -m unittest discover -s tests
 ```
 
-Contributions are welcome! Please open a pull reqeust.
+Contributions are welcome! Please open a pull request.
