@@ -742,18 +742,20 @@ input[type="range"] { accent-color: var(--accent); }
   }
 
   /* ---------------- lasso selection ---------------- */
-  // A freehand selection on one layer. The selected pixels can be dragged, duplicated, flipped or deleted; the result is
-  // one "lasso" op, replayed by cutting the outline out of the layer and pasting it at the offset.
-  let sel = null, lassoDraft = null; // sel: { layer, path, bx, by, bw, bh, dx, dy, flip, copy, img }
+  // A freehand selection on one layer. Like other drawing apps, every stroke the lasso touches is taken whole (plus
+  // whatever lies inside the loop). The selected pixels can be dragged, duplicated, flipped or deleted; the result is one
+  // "lasso" op holding the selection mask, replayed by cutting the masked pixels out and pasting them at the offset.
+  let sel = null, lassoDraft = null; // sel: { layer, mask, bx, by, bw, bh, dx, dy, flip, copy, img, hit }
   function lassoPath(c, path) { c.beginPath(); path.forEach(([x, y], i) => i ? c.lineTo(x, y) : c.moveTo(x, y)); c.closePath(); }
   function lassoCut(src, op) {
     const [t, tx] = mk(); t.width = Math.max(1, op.bw); t.height = Math.max(1, op.bh);
-    tx.translate(-op.bx, -op.by); lassoPath(tx, op.path); tx.clip(); tx.drawImage(src, 0, 0);
+    tx.drawImage(src, op.bx, op.by, op.bw, op.bh, 0, 0, op.bw, op.bh);
+    tx.globalCompositeOperation = "destination-in"; tx.drawImage(op.mask, 0, 0);
     return t;
   }
   function applyLasso(c, op, img) {
     c.save();
-    if (!op.copy) { c.globalCompositeOperation = "destination-out"; lassoPath(c, op.path); c.fill(); c.lineWidth = 1; c.stroke(); }
+    if (!op.copy) { c.globalCompositeOperation = "destination-out"; c.drawImage(op.mask, op.bx, op.by); }
     c.globalCompositeOperation = "source-over";
     if (!op.del) {
       c.translate(op.bx + op.dx + (op.flip ? op.bw : 0), op.by + op.dy); if (op.flip) c.scale(-1, 1);
@@ -761,22 +763,60 @@ input[type="range"] { accent-color: var(--accent); }
     }
     c.restore();
   }
+  // the points that decide whether the lasso touches an op
+  function opPoints(op) {
+    if (op.kind === "stroke") return op.points;
+    if (op.kind === "shape") return [[op.x1, op.y1], [op.x2, op.y2], [op.x1, op.y2], [op.x2, op.y1], [(op.x1 + op.x2) / 2, (op.y1 + op.y2) / 2]];
+    if (op.kind === "text" || op.kind === "sticker") return [[op.x, op.y]];
+    return null;
+  }
   function startSelection(l, path) {
-    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
-    for (const [x, y] of path) { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y); }
-    const bx = clamp(Math.floor(x0) - 1, 0, doc.w), by = clamp(Math.floor(y0) - 1, 0, doc.h);
-    const bw = clamp(Math.ceil(x1) + 1, 0, doc.w) - bx, bh = clamp(Math.ceil(y1) + 1, 0, doc.h) - by;
-    if (bw < 3 || bh < 3) { sel = null; return; }
-    sel = { layer: l, path, bx, by, bw, bh, dx: 0, dy: 0, flip: false, copy: false };
+    const [m, mx] = mk(CPU); m.width = doc.w; m.height = doc.h;
+    mx.fillStyle = "#000"; lassoPath(mx, path); mx.fill();
+    // whole strokes touched by the loop (positions shifted by later whole-layer moves)
+    const moves = [];
+    l.ops.forEach((op, i) => { if (op.kind === "move") moves.push([i, op.dx, op.dy]); });
+    const touched = [];
+    l.ops.forEach((op, i) => {
+      if (op.eraser || op.shade) return;
+      const pts = opPoints(op); if (!pts) return;
+      let ox = 0, oy = 0; for (const [j, dx, dy] of moves) if (j > i) { ox += dx; oy += dy; }
+      lassoPath(mx, path);
+      if (pts.some(q => mx.isPointInPath(q[0] + ox, q[1] + oy))) touched.push({ op, ox, oy });
+    });
+    for (const { op, ox, oy } of touched) {
+      mx.save(); mx.translate(ox, oy);
+      // a slightly wider copy of the stroke, so its soft edge comes along whole
+      const grow = op.kind === "stroke" ? (op.brush === "air" ? 4 : 3) : op.kind === "shape" ? 3 : 0;
+      const ghost = Object.assign({}, op, { color: "#000000", opacity: 1, eraser: false, size: op.size + grow });
+      if (op.kind === "stroke") { if (op.brush === "air" || op.brush === "pencil") ghost.brush = "pen"; drawStroke(mx, ghost, strokeState(ghost)); }
+      else renderOp(mx, ghost);
+      mx.restore();
+    }
+    // the selection's box
+    const a = mx.getImageData(0, 0, doc.w, doc.h).data;
+    let x0 = doc.w, y0 = doc.h, x1 = -1, y1 = -1;
+    for (let y = 0; y < doc.h; y++) { const row = y * doc.w; for (let x = 0; x < doc.w; x++) if (a[(row + x) * 4 + 3]) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; } }
+    if (x1 - x0 < 2 || y1 - y0 < 2) { sel = null; return; }
+    const bx = x0, by = y0, bw = x1 - x0 + 1, bh = y1 - y0 + 1;
+    const [mc, mcx] = mk(); mc.width = bw; mc.height = bh; mcx.drawImage(m, bx, by, bw, bh, 0, 0, bw, bh);
+    const hit = new Uint8Array(bw * bh);
+    for (let y = 0; y < bh; y++) for (let x = 0; x < bw; x++) hit[y * bw + x] = a[((by + y) * doc.w + bx + x) * 4 + 3];
+    sel = { layer: l, mask: mc, bx, by, bw, bh, dx: 0, dy: 0, flip: false, copy: false, hit };
     sel.img = lassoCut(l.cv, sel);
   }
-  const selOp = (extra) => ({ kind: "lasso", path: sel.path, bx: sel.bx, by: sel.by, bw: sel.bw, bh: sel.bh, dx: sel.dx, dy: sel.dy, flip: sel.flip, copy: sel.copy, del: false, ...extra });
+  const selOp = (extra) => ({ kind: "lasso", mask: sel.mask, bx: sel.bx, by: sel.by, bw: sel.bw, bh: sel.bh, dx: sel.dx, dy: sel.dy, flip: sel.flip, copy: sel.copy, del: false, ...extra });
+  // a press on or near the selected pixels (within a few screen pixels) grabs them
   function inSelection(d) {
     if (!sel) return false;
     let x = d.x - sel.dx, y = d.y - sel.dy;
     if (sel.flip) x = 2 * sel.bx + sel.bw - x;
-    if (x < sel.bx || y < sel.by || x > sel.bx + sel.bw || y > sel.by + sel.bh) return false;
-    lassoPath(covCtx, sel.path); return covCtx.isPointInPath(x, y);
+    x = Math.round(x - sel.bx); y = Math.round(y - sel.by);
+    const r = Math.ceil(12 / V.z);
+    if (x < -r || y < -r || x >= sel.bw + r || y >= sel.bh + r) return false;
+    for (let yy = Math.max(0, y - r); yy <= Math.min(sel.bh - 1, y + r); yy += 2)
+      for (let xx = Math.max(0, x - r); xx <= Math.min(sel.bw - 1, x + r); xx += 2) if (sel.hit[yy * sel.bw + xx]) return true;
+    return false;
   }
   // finish the selection: write what was done to it into the layer (nothing if it was only selected)
   function commitSel(extra) {
@@ -787,16 +827,16 @@ input[type="range"] { accent-color: var(--accent); }
     if (S.tool === "lasso") renderOptions();
   }
   function cancelSel() { if (!sel) return; sel = null; requestRender(true); if (S.tool === "lasso") renderOptions(); }
-  // the selection's outline on screen, with its current offset and flip
+  // on screen: the loop while it is being drawn, then a dashed box around what was selected
   function drawSelOutline(c) {
-    const path = sel ? sel.path : lassoDraft;
-    if (!path || path.length < 2) return;
-    c.save();
-    if (sel) { c.translate(sel.dx + (sel.flip ? 2 * sel.bx + sel.bw : 0), sel.dy); if (sel.flip) c.scale(-1, 1); }
-    c.beginPath(); path.forEach(([x, y], i) => i ? c.lineTo(x, y) : c.moveTo(x, y)); if (sel) c.closePath();
+    if (!sel && (!lassoDraft || lassoDraft.length < 2)) return;
+    c.save(); c.beginPath();
+    if (sel) c.rect(sel.bx + sel.dx - 3 / V.z, sel.by + sel.dy - 3 / V.z, sel.bw + 6 / V.z, sel.bh + 6 / V.z);
+    else lassoDraft.forEach(([x, y], i) => i ? c.lineTo(x, y) : c.moveTo(x, y));
     c.lineWidth = 1.5 / V.z; c.setLineDash([6 / V.z, 5 / V.z]);
     c.strokeStyle = "rgba(255,255,255,.95)"; c.stroke();
     c.lineDashOffset = 5.5 / V.z; c.strokeStyle = "rgba(20,20,24,.9)"; c.stroke();
+    if (sel) { c.fillStyle = "rgba(77,141,255,.07)"; c.fillRect(sel.bx + sel.dx, sel.by + sel.dy, sel.bw, sel.bh); }
     c.restore();
   }
 
@@ -1090,10 +1130,10 @@ input[type="range"] { accent-color: var(--accent); }
     } else if (t === "move") {
       parts.push(hint("드래그하면 선택한 레이어 전체가 움직여요."));
     } else if (t === "lasso") {
-      if (!sel) parts.push(hint("고르고 싶은 부분을 둘러서 그려요. 지금 레이어에서 골라져요."));
+      if (!sel) parts.push(hint("고르고 싶은 획을 둘러서 그려요. 올가미에 닿은 획은 통째로 골라져요. 지금 레이어에서만 골라져요."));
       else {
         const btn = (id, label, fn, cls = "") => ({ html: `<button id="${id}" class="${cls}">${label}</button>`, bind() { $(id).onclick = fn; } });
-        parts.push(hint("안쪽을 끌어서 옮겨요."));
+        parts.push(hint("고른 그림을 끌어서 옮겨요."));
         parts.push(btn("sel-copy", sel.copy ? "복제됨" : "복제", () => { if (sel) { sel.copy = !sel.copy; if (sel.copy && !sel.dx && !sel.dy) { sel.dx = Math.round(20 / V.z); sel.dy = Math.round(20 / V.z); } renderOptions(); requestRender(true); } }));
         parts.push(btn("sel-flip", "좌우 반전", () => { if (sel) { sel.flip = !sel.flip; requestRender(true); } }));
         parts.push(btn("sel-del", "지우기", () => commitSel({ del: true, dx: 0, dy: 0, flip: false, copy: false })));
