@@ -95,6 +95,7 @@ input[type="range"] { accent-color: var(--accent); }
 .rail .tool { width: 40px; min-height: 40px; padding: 0; border-radius: 10px; flex: none; }
 .rail .tool svg.i { width: 20px; height: 20px; }
 .rail .tool { position: relative; }
+#lock[aria-pressed="true"] { background: var(--accent); color: #fff; border-color: transparent; }
 .rail .tool .more { position: absolute; right: 4px; bottom: 4px; width: 0; height: 0; border-left: 5px solid transparent; border-bottom: 5px solid currentColor; opacity: .7; }
 .rail .tool[aria-pressed="true"] { background: var(--accent); color: #fff; border-color: transparent; }
 .chips { margin-top: auto; position: relative; width: 40px; height: 44px; flex: none; }
@@ -218,6 +219,7 @@ input[type="range"] { accent-color: var(--accent); }
     <button id="flip" class="icon" title="좌우 반전해서 보기" aria-label="좌우 반전해서 보기" aria-pressed="false"><svg class="i" viewBox="0 0 24 24"><path d="M12 3v18"/><path d="M8 7l-5 5 5 5z"/><path d="M16 7l5 5-5 5z"/></svg></button>
     <button id="sym" class="icon" title="좌우 대칭 그리기" aria-label="좌우 대칭 그리기" aria-pressed="false"><svg class="i" viewBox="0 0 24 24"><path d="M12 3v18" stroke-dasharray="2 3"/><path d="M9 7c-3 1-4 3-4 5s1 4 4 5"/><path d="M15 7c3 1 4 3 4 5s-1 4-4 5"/></svg></button>
     <button id="input-mode" aria-pressed="false"></button>
+    <button id="lock" aria-pressed="false" title="종이 고정: 켜면 손가락이나 마우스로 종이가 움직이거나 확대되지 않아요" aria-label="종이 고정"><svg class="i" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="10" rx="2"/><path id="lock-shackle" d="M8 11V8a4 4 0 018 0"/></svg><span class="label">종이 고정</span></button>
     <span class="docsize" id="docsize"></span>
     <span class="savestate" id="savestate" aria-live="polite"></span>
     <div class="spacer"></div>
@@ -363,7 +365,7 @@ input[type="range"] { accent-color: var(--accent); }
     brushOpacity: { pen: 100, pencil: 90, marker: 50, air: 60, ink: 100, shade: 100 },
     shadeMode: "shadow", shadeStrength: 45, shadeHue: 35, shadeSoft: true,
     eraserSize: 40, eraserOpacity: 100, softEraser: false,
-    smooth: 30, tol: 32, fillAll: true, fillOpacity: 100,
+    smooth: 50, tol: 32, fillAll: true, fillOpacity: 100,
     shape: "rect", shapeFill: false, shapeSize: 6, shapeOpacity: 100,
     font: "Gowun Dodum", textSize: 72, textOpacity: 100,
     sticker: "⭐", sym: false,
@@ -431,7 +433,7 @@ input[type="range"] { accent-color: var(--accent); }
     ctx.save(); ctx.fillStyle = ctx.strokeStyle = col; ctx.lineCap = "round"; ctx.lineJoin = "round";
     const both = fn => { fn(false); if (Mx) fn(true); };
     const X = (x, m) => m ? Mx - x : x;
-    const dot = (x, y, r) => both(m => { ctx.beginPath(); ctx.arc(X(x, m), y, Math.max(0.3, r), 0, Math.PI * 2); ctx.fill(); });
+    const dot = (x, y, r) => both(m => { ctx.beginPath(); ctx.arc(X(x, m), y, Math.max(0.5, r), 0, Math.PI * 2); ctx.fill(); if (r < 1.5) ctx.fill(); });
     // a tapered capsule from a to b: the hull of the two end circles, so width changes blend smoothly
     const capsule = (a, ra, b, rb) => {
       const dx = b[0] - a[0], dy = b[1] - a[1], d = Math.hypot(dx, dy);
@@ -458,8 +460,12 @@ input[type="range"] { accent-color: var(--accent); }
       if (op.brush === "pen" && op.pressure) {
         for (let k = 1; k < pts.length; k++) capsule(pts[k - 1], widthAt(op, pts[k - 1]) / 2, pts[k], widthAt(op, pts[k]) / 2);
       } else if (op.brush === "pen" || op.brush === "marker") {
-        ctx.lineWidth = op.brush === "marker" ? op.size : widthAt(op, b);
-        both(m => { ctx.beginPath(); ctx.moveTo(X(pts[0][0], m), pts[0][1]); for (let k = 1; k < pts.length; k++) ctx.lineTo(X(pts[k][0], m), pts[k][1]); ctx.stroke(); });
+        const lw = op.brush === "marker" ? op.size : widthAt(op, b);
+        ctx.lineWidth = Math.max(1, lw);
+        // a thin line covers no pixel fully, so its edge smoothing makes it look paler than its colour; going over it
+        // again inside the (opaque) stroke buffer restores full colour without making it wider
+        const passes = lw < 3 ? 2 : 1;
+        both(m => { ctx.beginPath(); ctx.moveTo(X(pts[0][0], m), pts[0][1]); for (let k = 1; k < pts.length; k++) ctx.lineTo(X(pts[k][0], m), pts[k][1]); for (let q = 0; q < passes; q++) ctx.stroke(); });
       } else if (op.brush === "ink") {
         const nx = Math.SQRT1_2, ny = -Math.SQRT1_2;
         for (let k = 1; k < pts.length; k++) {
@@ -778,7 +784,7 @@ input[type="range"] { accent-color: var(--accent); }
       vctx.beginPath(); vctx.moveTo(doc.w / 2, 0); vctx.lineTo(doc.w / 2, doc.h); vctx.stroke(); vctx.restore();
     }
     if (hover && (S.tool === "brush" || S.tool === "eraser") && !(gesture && gesture.type === "pan") && !spaceDown) {
-      const r = Math.max(1, curSize() / 2);
+      const r = Math.max(1, curSize() * (S.tool === "text" ? 1 : sizeScale()) / 2);
       vctx.lineWidth = 1 / V.z;
       vctx.strokeStyle = "rgba(0,0,0,.6)"; vctx.beginPath(); vctx.arc(hover.x, hover.y, r, 0, Math.PI * 2); vctx.stroke();
       vctx.strokeStyle = "rgba(255,255,255,.8)"; vctx.beginPath(); vctx.arc(hover.x, hover.y, r + 1 / V.z, 0, Math.PI * 2); vctx.stroke();
@@ -861,6 +867,9 @@ input[type="range"] { accent-color: var(--accent); }
   $("undo").onclick = undo; $("redo").onclick = redo;
 
   /* ---------------- tool options ---------------- */
+  // Brush widths are set for a 1600 px picture and scaled to the actual paper, so the same 굵기 looks the same
+  // on a computer and on a phone/tablet (whose pictures have more pixels).
+  const sizeScale = () => Math.max(doc.w, doc.h) / 1600 || 1;
   const curSize = () => S.tool === "eraser" ? S.eraserSize : S.tool === "shape" ? S.shapeSize : S.tool === "text" ? S.textSize : S.brushSize[S.brush];
   function setCurSize(v) {
     const inp = $("o-size"), lo = inp ? +inp.dataset.min : 1, hi = inp ? +inp.dataset.max : 400;
@@ -954,12 +963,12 @@ input[type="range"] { accent-color: var(--accent); }
         parts.push(slider("o-shue", "색감 변화", 0, 100, S.shadeHue, pct, v => { S.shadeHue = v; drawBrushPreviews(); }));
         parts.push(seg("o-ssoft", [["soft", "부드럽게"], ["hard", "선명하게"]], S.shadeSoft ? "soft" : "hard", k => S.shadeSoft = k === "soft"));
       }
-      parts.push(sizeSlider("크기", 1, SIZE_MAX[b], S.brushSize[b], v => { S.brushSize[S.brush] = v; requestRender(); }));
+      parts.push(sizeSlider("굵기", 1, SIZE_MAX[b], S.brushSize[b], v => { S.brushSize[S.brush] = v; requestRender(); }));
       parts.push(slider("o-op", "불투명도", 1, 100, S.brushOpacity[b], pct, v => { S.brushOpacity[S.brush] = v; drawBrushPreviews(); }));
       parts.push(slider("o-sm", "손떨림 보정", 0, 100, S.smooth, pct, v => S.smooth = v));
     } else if (t === "eraser") {
       parts.push(seg("o-soft", [["hard", "딱딱한 지우개"], ["soft", "부드러운 지우개"]], S.softEraser ? "soft" : "hard", k => S.softEraser = k === "soft"));
-      parts.push(sizeSlider("크기", 1, 200, S.eraserSize, v => { S.eraserSize = v; requestRender(); }));
+      parts.push(sizeSlider("굵기", 1, 200, S.eraserSize, v => { S.eraserSize = v; requestRender(); }));
       parts.push(slider("o-op", "세기", 1, 100, S.eraserOpacity, pct, v => S.eraserOpacity = v));
     } else if (t === "fill") {
       parts.push(seg("o-ref", [["all", "보이는 모든 레이어 기준"], ["one", "현재 레이어 기준"]], S.fillAll ? "all" : "one", k => S.fillAll = k === "all"));
@@ -968,7 +977,7 @@ input[type="range"] { accent-color: var(--accent); }
     } else if (t === "shape") {
       parts.push(seg("o-shape", SHAPES, S.shape, k => S.shape = k));
       parts.push(seg("o-sfill", [["line", "선만"], ["fill", "면 채우기"]], S.shapeFill ? "fill" : "line", k => S.shapeFill = k === "fill"));
-      parts.push(sizeSlider("선 두께", 1, 60, S.shapeSize, v => S.shapeSize = v));
+      parts.push(sizeSlider("굵기", 1, 60, S.shapeSize, v => S.shapeSize = v));
       parts.push(slider("o-op", "불투명도", 1, 100, S.shapeOpacity, pct, v => S.shapeOpacity = v));
       parts.push(hint("Shift: 정사각형·정원·45° 직선"));
     } else if (t === "text") {
@@ -1296,6 +1305,16 @@ input[type="range"] { accent-color: var(--accent); }
              : "손가락 모드: 손가락으로도 그릴 수 있어요.");
   }
   $("input-mode").onclick = () => setPenOnly(!S.penOnly);
+  // paper lock: while on, pinch, drag-to-move and wheel zoom leave the paper where it is (zoom buttons still work)
+  function setLocked(on, quiet) {
+    S.locked = on;
+    $("lock").setAttribute("aria-pressed", on);
+    $("lock-shackle").setAttribute("d", on ? "M8 11V8a4 4 0 018 0v3" : "M8 11V8a4 4 0 018 0");
+    try { localStorage.setItem("sketchbook-lock", on ? "1" : "0"); } catch (e) {}
+    if (!quiet) toast(on ? "종이를 고정했어요. 손가락으로 움직이거나 확대되지 않아요." : "종이 고정을 풀었어요.");
+  }
+  $("lock").onclick = () => setLocked(!S.locked);
+  try { setLocked(localStorage.getItem("sketchbook-lock") === "1", true); } catch (e) { setLocked(false, true); }
   setPenOnly(!!S.penOnly, true, true);
 
   view.addEventListener("pointerdown", e => {
@@ -1322,7 +1341,7 @@ input[type="range"] { accent-color: var(--accent); }
     }
     if (pointers.size > 2) return;
     if (S.tool === "hand" || spaceDown || e.button === 1) {
-      gesture = { type: "pan", sx: sp.x, sy: sp.y, ox: V.ox, oy: V.oy }; updateCursor(); return;
+      gesture = { type: "pan", explicit: true, sx: sp.x, sy: sp.y, ox: V.ox, oy: V.oy }; updateCursor(); return;
     }
     if (e.button !== 0 && e.pointerType === "mouse") return;
     const d = toDoc(sp), l = activeLayer();
@@ -1336,8 +1355,8 @@ input[type="range"] { accent-color: var(--accent); }
       const er = tool === "eraser";
       const op = {
         kind: "stroke", brush: er ? (S.softEraser ? "air" : "pen") : S.brush, eraser: er, color: S.color,
-        size: er ? S.eraserSize : S.brushSize[S.brush], opacity: (er ? S.eraserOpacity : S.brushOpacity[S.brush]) / 100,
-        pressure: e.pointerType === "pen", seed: (Math.random() * 2 ** 31) | 0, mirror: S.sym ? doc.w : 0,
+        size: (er ? S.eraserSize : S.brushSize[S.brush]) * sizeScale(), opacity: (er ? S.eraserOpacity : S.brushOpacity[S.brush]) / 100,
+        pressure: e.pointerType === "pen" && S.brush === "ink" && !er, seed: (Math.random() * 2 ** 31) | 0, mirror: S.sym ? doc.w : 0,
         points: [[d.x, d.y, e.pointerType === "pen" ? Math.max(0.2, e.pressure || 0.5) : 0.5]],
       };
       lctx.clearRect(0, 0, doc.w, doc.h);
@@ -1352,9 +1371,9 @@ input[type="range"] { accent-color: var(--accent); }
         const st = strokeState(op); drawStroke(lctx, op, st);
         live = { kind: "stroke", layer: l, op, st };
       }
-      gesture = { type: "stroke", last: d, p: op.points[0][2] };
+      gesture = { type: "stroke", last: d, lazy: d, p: op.points[0][2] };
     } else if (tool === "shape") {
-      live = { kind: "op", layer: l, op: { kind: "shape", shape: S.shape, filled: S.shapeFill, color: S.color, size: S.shapeSize, opacity: S.shapeOpacity / 100, x1: d.x, y1: d.y, x2: d.x, y2: d.y } };
+      live = { kind: "op", layer: l, op: { kind: "shape", shape: S.shape, filled: S.shapeFill, color: S.color, size: S.shapeSize * sizeScale(), opacity: S.shapeOpacity / 100, x1: d.x, y1: d.y, x2: d.x, y2: d.y } };
       gesture = { type: "shape" };
     } else if (tool === "sticker") {
       live = { kind: "op", layer: l, op: { kind: "sticker", emoji: S.sticker, x: d.x, y: d.y, size: Math.round(Math.min(doc.w, doc.h) * 0.12) } };
@@ -1372,6 +1391,7 @@ input[type="range"] { accent-color: var(--accent); }
     hover = e.pointerType === "mouse" || (e.pointerType === "pen" && !e.buttons) ? toDoc(sp) : null;
     if (!gesture) { if (S.tool === "brush" || S.tool === "eraser") requestRender(); return; }
     const g = gesture;
+    if (S.locked && (g.type === "pinch" || (g.type === "pan" && !g.explicit))) return; // the hand tool still moves a locked paper
     if (g.type === "pinch") {
       if (pointers.size < 2) return;
       const [a, b] = [...pointers.values()], c = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
@@ -1382,10 +1402,14 @@ input[type="range"] { accent-color: var(--accent); }
     if (g.type === "picker") { pickColor(d); return; }
     if (g.type === "stroke") {
       const op = live.op, evs = e.getCoalescedEvents ? e.getCoalescedEvents() : [], n0 = op.points.length;
-      const f = 1 - (S.smooth / 100) * 0.92;
+      // The drawn point trails the pen on a short string: it only moves once the pen is further away than the string's
+      // length, so tremble and uneven reports are absorbed. A light easing on top rounds off the remaining corners.
+      const R = (S.smooth / 100) * 20 / V.z, ease = 1 - (S.smooth / 100) * 0.6;
       for (const ev of (evs.length ? evs : [e])) {
         const r = toDoc(screenPt(ev)), last = g.last;
-        const nx = last.x + (r.x - last.x) * f, ny = last.y + (r.y - last.y) * f;
+        const ddx = r.x - g.lazy.x, ddy = r.y - g.lazy.y, dist = Math.hypot(ddx, ddy);
+        if (dist > R) g.lazy = { x: r.x - ddx / dist * R, y: r.y - ddy / dist * R };
+        const nx = last.x + (g.lazy.x - last.x) * ease, ny = last.y + (g.lazy.y - last.y) * ease;
         if (Math.hypot(nx - last.x, ny - last.y) < 0.4) continue;
         g.last = { x: nx, y: ny };
         g.p += ((ev.pressure || 0.5) - g.p) * 0.3; // Apple Pencil pressure jumps between reports; ease it so the width doesn't wobble
@@ -1462,6 +1486,7 @@ input[type="range"] { accent-color: var(--accent); }
   view.addEventListener("pointerleave", () => { hover = null; requestRender(); });
   view.addEventListener("wheel", e => {
     e.preventDefault();
+    if (S.locked) return;
     const sp = screenPt(e);
     if (e.shiftKey) { V.ox -= e.deltaY || e.deltaX; repositionText(); requestRender(); return; }
     zoomAt(sp, V.z * Math.exp(-e.deltaY * (e.ctrlKey ? 0.01 : 0.0015)));
@@ -1587,7 +1612,8 @@ input[type="range"] { accent-color: var(--accent); }
   function setSaveState(t) { $("savestate").textContent = t; }
   function scheduleSave() {
     if (restoring || !cur) return;
-    dirty = true; clearTimeout(saveTimer); setSaveState("저장 중…"); saveTimer = setTimeout(persist, 1000);
+    dirty = true; setSaveState("");
+    if (!saveTimer) saveTimer = setTimeout(persist, 60000);
   }
   async function makeThumb() {
     renderDoc();
@@ -1599,8 +1625,9 @@ input[type="range"] { accent-color: var(--accent); }
   let saving = null;
   async function persist() {
     if (!cur) return;
-    if (live) { scheduleSave(); return; } // wait for the stroke to finish
-    dirty = false;
+    clearTimeout(saveTimer); saveTimer = 0;
+    if (live) { saveTimer = setTimeout(persist, 1500); return; } // wait for the stroke to finish
+    dirty = false; setSaveState("저장 중…");
     const job = (async () => {
       try {
         const covPng = async (l, mode) => {
@@ -1619,12 +1646,12 @@ input[type="range"] { accent-color: var(--accent); }
         const data = { v: 2, w: doc.w, h: doc.h, bg: doc.bg, bgVisible: doc.bgVisible, active: layers.findIndex(l => l.id === active), layers: ls };
         const meta = { id: cur.id, name: cur.name, created: cur.created, updated: Date.now(), w: doc.w, h: doc.h, thumb: await makeThumb() };
         await tx(["drawings", "meta"], "readwrite", (d, m) => { d.put(data, cur.id); m.put(meta, cur.id); });
-        setSaveState("저장됨");
+        const t = new Date(); setSaveState(`${t.getHours()}:${String(t.getMinutes()).padStart(2, "0")} 저장됨`);
       } catch (e) { dirty = true; setSaveState("자동 저장 안 됨"); /* storage unavailable (private window etc.): keep working */ }
     })();
     saving = job; await job; if (saving === job) saving = null;
   }
-  async function saveNow() { clearTimeout(saveTimer); if (saving) await saving; if (cur && !restoring && dirty) await persist(); }
+  async function saveNow() { clearTimeout(saveTimer); saveTimer = 0; if (saving) await saving; if (cur && !restoring && dirty) await persist(); }
   async function loadData(d) {
     resetDoc(d.w, d.h, d.bg, d.bgVisible);
     const built = [];
@@ -1724,7 +1751,8 @@ input[type="range"] { accent-color: var(--accent); }
     return c;
   }
   $("home-btn").onclick = () => showGallery();
-  document.addEventListener("visibilitychange", () => { if (document.hidden && !restoring && cur && dirty) { clearTimeout(saveTimer); persist(); } });
+  document.addEventListener("visibilitychange", () => { if (document.hidden && !restoring && cur && dirty) persist(); });
+  addEventListener("pagehide", () => { if (!restoring && cur && dirty) persist(); });
   window.sketchbookSaveNow = () => saveNow(); // used by the home-screen app before it reloads for an update
 
   async function start() {
