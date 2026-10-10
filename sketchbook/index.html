@@ -1003,6 +1003,26 @@ input[type="range"] { accent-color: var(--accent); }
       dctx.drawImage(src, x, y, w, h, x, y, w, h);
     }
     dctx.globalAlpha = 1; dctx.globalCompositeOperation = "source-over";
+    updateMips(x, y, w, h);
+  }
+  // Half- and quarter-size copies of the picture. Shrinking a big canvas straight onto the screen skips pixels and makes
+  // lines look jagged; halving step by step averages them, like the smooth zoomed-out view of other drawing apps.
+  const mips = [mk(), mk()];
+  function sizeMips() { mips.forEach(([c], i) => { const f = 2 << i; c.width = Math.max(1, Math.ceil(doc.w / f)); c.height = Math.max(1, Math.ceil(doc.h / f)); }); }
+  function updateMips(x, y, w, h) {
+    let src = docCv;
+    for (let i = 0; i < mips.length; i++) {
+      const [c, cx] = mips[i], f = 2 << i, a = 2 << i;
+      // whole cells on both levels, so the edges of a partial update don't seam
+      const x0 = Math.floor(x / a / 2) * a * 2, y0 = Math.floor(y / a / 2) * a * 2;
+      const x1 = Math.min(doc.w, Math.ceil((x + w) / a / 2) * a * 2), y1 = Math.min(doc.h, Math.ceil((y + h) / a / 2) * a * 2);
+      const sf = f / 2; // scale of the source level
+      cx.imageSmoothingEnabled = true; cx.imageSmoothingQuality = "high";
+      const sx = x0 / sf, sy = y0 / sf, sw = Math.min(src.width - sx, (x1 - x0) / sf), sh = Math.min(src.height - sy, (y1 - y0) / sf);
+      if (sw <= 0 || sh <= 0) return;
+      cx.clearRect(x0 / f, y0 / f, sw / 2, sh / 2); cx.drawImage(src, sx, sy, sw, sh, x0 / f, y0 / f, sw / 2, sh / 2);
+      src = c;
+    }
   }
   let checker = null;
   function renderView() {
@@ -1021,8 +1041,11 @@ input[type="range"] { accent-color: var(--accent); }
       checker.setTransform(new DOMMatrix().scale(1 / V.z));
       vctx.fillStyle = checker; vctx.fillRect(0, 0, doc.w, doc.h);
     }
-    vctx.imageSmoothingEnabled = V.z * dpr < 4; // only show hard pixels when zoomed far in
-    vctx.drawImage(docCv, 0, 0);
+    const sc = V.z * dpr;
+    vctx.imageSmoothingEnabled = sc < 8; vctx.imageSmoothingQuality = "high"; // hard pixels only when zoomed far in
+    if (sc < 0.36) vctx.drawImage(mips[1][0], 0, 0, doc.w, doc.h);
+    else if (sc < 0.72) vctx.drawImage(mips[0][0], 0, 0, doc.w, doc.h);
+    else vctx.drawImage(docCv, 0, 0);
     vctx.imageSmoothingEnabled = true;
     drawSelOutline(vctx);
     if (S.sym) {
@@ -1833,7 +1856,7 @@ input[type="range"] { accent-color: var(--accent); }
   function resetDoc(w, h, bg, bgVisible) {
     sel = null; lassoDraft = null;
     doc.w = w; doc.h = h; doc.bg = bg; doc.bgVisible = bgVisible;
-    [docCv, tmp, sbuf, lbuf, mvCv, maskCv, tailCv].forEach(c => { c.width = w; c.height = h; });
+    [docCv, tmp, sbuf, lbuf, mvCv, maskCv, tailCv].forEach(c => { c.width = w; c.height = h; }); sizeMips();
     layerSeq = 0; layers = [makeLayer()]; active = layers[0].id;
     undoStack = []; redoStack = []; live = null; gesture = null;
     $("docsize").textContent = `${w} × ${h}`;
