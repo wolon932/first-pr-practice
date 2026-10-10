@@ -771,25 +771,47 @@ input[type="range"] { accent-color: var(--accent); }
   function opPoints(op) {
     if (op.kind === "stroke") return op.points;
     if (op.kind === "shape") return [[op.x1, op.y1], [op.x2, op.y2], [op.x1, op.y2], [op.x2, op.y1], [(op.x1 + op.x2) / 2, (op.y1 + op.y2) / 2]];
-    if (op.kind === "text" || op.kind === "sticker") return [[op.x, op.y]];
+    if (op.kind === "sticker") { const h = op.size / 2; return [[op.x, op.y], [op.x - h, op.y - h], [op.x + h, op.y - h], [op.x - h, op.y + h], [op.x + h, op.y + h]]; }
+    if (op.kind === "text") {
+      const lines = op.text.split("\n"), w = Math.max(...lines.map(t => t.length)) * op.size * 0.6, h = lines.length * op.size * 1.25, pts = [];
+      for (let y = 0; y <= 4; y++) for (let x = 0; x <= 8; x++) pts.push([op.x + w * x / 8, op.y + h * y / 4]);
+      return pts;
+    }
     return null;
+  }
+  // where each op's lines are now: whole-layer moves and earlier lasso edits that took the op carry it along
+  function lassoMatrix(op) {
+    const cx = op.bx + op.bw / 2, cy = op.by + op.bh / 2, sc = op.s || 1;
+    return new DOMMatrix().translate(cx + op.dx, cy + op.dy).rotate((op.r || 0) * 180 / Math.PI).scale(op.flip ? -sc : sc, sc).translate(-cx, -cy);
+  }
+  function placedOps(l) {
+    const items = [];
+    l.ops.forEach((op, i) => {
+      if (op.kind === "move") { const t = new DOMMatrix().translate(op.dx, op.dy); items.forEach(it => it.m = t.multiply(it.m)); }
+      else if (op.kind === "lasso") {
+        if (!op.taken) return;
+        const t = lassoMatrix(op), add = [];
+        for (const it of items) {
+          if (!op.taken.has(it.key)) continue;
+          if (op.del) it.gone = true;
+          else if (op.copy) add.push({ op: it.op, m: t.multiply(it.m), key: it.key + ">" + i });
+          else it.m = t.multiply(it.m);
+        }
+        items.push(...add);
+      } else if (!op.eraser && !op.shade && opPoints(op)) items.push({ op, m: new DOMMatrix(), key: String(i) });
+    });
+    return items.filter(it => !it.gone);
   }
   function startSelection(l, path) {
     const [m, mx] = mk(CPU); m.width = doc.w; m.height = doc.h;
-    mx.fillStyle = "#000"; lassoPath(mx, path); mx.fill();
-    // whole strokes touched by the loop (positions shifted by later whole-layer moves)
-    const moves = [];
-    l.ops.forEach((op, i) => { if (op.kind === "move") moves.push([i, op.dx, op.dy]); });
+    mx.fillStyle = "#000";
+    // whole strokes touched by the loop, wherever earlier moves and lasso edits put them
     const touched = [];
-    l.ops.forEach((op, i) => {
-      if (op.eraser || op.shade) return;
-      const pts = opPoints(op); if (!pts) return;
-      let ox = 0, oy = 0; for (const [j, dx, dy] of moves) if (j > i) { ox += dx; oy += dy; }
-      lassoPath(mx, path);
-      if (pts.some(q => mx.isPointInPath(q[0] + ox, q[1] + oy))) touched.push({ op, ox, oy });
-    });
-    for (const { op, ox, oy } of touched) {
-      mx.save(); mx.translate(ox, oy);
+    lassoPath(mx, path);
+    for (const it of placedOps(l)) if (opPoints(it.op).some(q => { const t = it.m.transformPoint({ x: q[0], y: q[1] }); return mx.isPointInPath(t.x, t.y); })) touched.push(it);
+    for (const it of touched) {
+      const op = it.op;
+      mx.save(); mx.setTransform(it.m);
       // a slightly wider copy of the stroke, so its soft edge comes along whole
       const grow = op.kind === "stroke" ? (op.brush === "air" ? 4 : 3) : op.kind === "shape" ? 3 : 0;
       const ghost = Object.assign({}, op, { color: "#000000", opacity: 1, eraser: false, size: op.size + grow });
@@ -801,17 +823,18 @@ input[type="range"] { accent-color: var(--accent); }
     // there the lasso takes every line connected to what it touched
     const [pc, pcx] = mk(CPU); pc.width = doc.w; pc.height = doc.h;
     let pix = false;
-    l.ops.forEach((op, i) => {
-      if (op.shade || (op.kind !== "image" && op.kind !== "fill")) return;
-      let ox = 0, oy = 0; for (const [j, dx, dy] of moves) if (j > i) { ox += dx; oy += dy; }
-      pcx.save(); pcx.translate(ox, oy); renderOp(pcx, op); pcx.restore(); pix = true;
-    });
+    for (const op of l.ops) {
+      if (op.shade) continue;
+      if (op.kind === "image" || op.kind === "fill") pix = true;
+      else if (!(op.kind === "move" || op.kind === "lasso" || (op.kind === "stroke" && op.eraser))) continue;
+      renderOp(pcx, op);
+    }
     if (pix) {
-      const W = doc.w, H = doc.h, pa = pcx.getImageData(0, 0, W, H).data, la = l.cx.getImageData(0, 0, W, H).data;
+      const W = doc.w, H = doc.h, pa = pcx.getImageData(0, 0, W, H).data;
       const [pm, pmx] = mk(CPU); pm.width = W; pm.height = H; lassoPath(pmx, path); pmx.fill();
       const loop = pmx.getImageData(0, 0, W, H).data;
       const ok = new Uint8Array(W * H), seen = new Uint8Array(W * H), stack = [];
-      for (let k = 0; k < W * H; k++) if (pa[k * 4 + 3] > 0 && la[k * 4 + 3] > 24) { ok[k] = 1; if (loop[k * 4 + 3]) { seen[k] = 1; stack.push(k); } }
+      for (let k = 0; k < W * H; k++) if (pa[k * 4 + 3] > 24) { ok[k] = 1; if (loop[k * 4 + 3]) { seen[k] = 1; stack.push(k); } }
       const out = new ImageData(W, H), od = out.data;
       while (stack.length) {
         const k = stack.pop(), x = k % W, y = (k - x) / W; od[k * 4 + 3] = 255;
@@ -829,10 +852,10 @@ input[type="range"] { accent-color: var(--accent); }
     if (x1 - x0 < 2 || y1 - y0 < 2) { sel = null; return; }
     const bx = x0, by = y0, bw = x1 - x0 + 1, bh = y1 - y0 + 1;
     const [mc, mcx] = mk(); mc.width = bw; mc.height = bh; mcx.drawImage(m, bx, by, bw, bh, 0, 0, bw, bh);
-    sel = { layer: l, mask: mc, bx, by, bw, bh, dx: 0, dy: 0, s: 1, r: 0, flip: false, copy: false };
+    sel = { layer: l, mask: mc, bx, by, bw, bh, dx: 0, dy: 0, s: 1, r: 0, flip: false, copy: false, taken: new Set(touched.map(it => it.key)) };
     sel.img = lassoCut(l.cv, sel);
   }
-  const selOp = (extra) => ({ kind: "lasso", mask: sel.mask, bx: sel.bx, by: sel.by, bw: sel.bw, bh: sel.bh, dx: sel.dx, dy: sel.dy, s: sel.s, r: sel.r, flip: sel.flip, copy: sel.copy, del: false, ...extra });
+  const selOp = (extra) => ({ kind: "lasso", mask: sel.mask, bx: sel.bx, by: sel.by, bw: sel.bw, bh: sel.bh, dx: sel.dx, dy: sel.dy, s: sel.s, r: sel.r, flip: sel.flip, copy: sel.copy, taken: sel.taken, del: false, ...extra });
   // transform box: centre, and the four corners / rotation handle in document coordinates
   const selChanged = () => sel && (sel.dx || sel.dy || sel.flip || sel.s !== 1 || sel.r);
   const selCenter = () => ({ x: sel.bx + sel.bw / 2 + sel.dx, y: sel.by + sel.bh / 2 + sel.dy });
