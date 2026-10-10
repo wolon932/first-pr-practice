@@ -1,5 +1,5 @@
 // Offline support: app files are cached on first visit; the page itself is refreshed from the network when online.
-const CACHE = "sketchbook-v20";
+const CACHE = "sketchbook-v21";
 const CORE = ["./", "index.html", "manifest.webmanifest", "icons/icon-192.png", "icons/icon-512.png", "icons/apple-touch-icon.png"];
 self.addEventListener("install", e => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(CORE)).then(() => self.skipWaiting())); });
 self.addEventListener("activate", e => {
