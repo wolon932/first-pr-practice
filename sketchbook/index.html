@@ -797,6 +797,31 @@ input[type="range"] { accent-color: var(--accent); }
       else renderOp(mx, ghost);
       mx.restore();
     }
+    // pictures kept only as pixels (a reopened drawing, a merged layer, a bucket fill) have no strokes to look up, so
+    // there the lasso takes every line connected to what it touched
+    const [pc, pcx] = mk(CPU); pc.width = doc.w; pc.height = doc.h;
+    let pix = false;
+    l.ops.forEach((op, i) => {
+      if (op.shade || (op.kind !== "image" && op.kind !== "fill")) return;
+      let ox = 0, oy = 0; for (const [j, dx, dy] of moves) if (j > i) { ox += dx; oy += dy; }
+      pcx.save(); pcx.translate(ox, oy); renderOp(pcx, op); pcx.restore(); pix = true;
+    });
+    if (pix) {
+      const W = doc.w, H = doc.h, pa = pcx.getImageData(0, 0, W, H).data, la = l.cx.getImageData(0, 0, W, H).data;
+      const [pm, pmx] = mk(CPU); pm.width = W; pm.height = H; lassoPath(pmx, path); pmx.fill();
+      const loop = pmx.getImageData(0, 0, W, H).data;
+      const ok = new Uint8Array(W * H), seen = new Uint8Array(W * H), stack = [];
+      for (let k = 0; k < W * H; k++) if (pa[k * 4 + 3] > 0 && la[k * 4 + 3] > 24) { ok[k] = 1; if (loop[k * 4 + 3]) { seen[k] = 1; stack.push(k); } }
+      const out = new ImageData(W, H), od = out.data;
+      while (stack.length) {
+        const k = stack.pop(), x = k % W, y = (k - x) / W; od[k * 4 + 3] = 255;
+        for (let yy = Math.max(0, y - 1); yy <= Math.min(H - 1, y + 1); yy++)
+          for (let xx = Math.max(0, x - 1); xx <= Math.min(W - 1, x + 1); xx++) { const n = yy * W + xx; if (ok[n] && !seen[n]) { seen[n] = 1; stack.push(n); } }
+      }
+      const [fc, fcx] = mk(CPU); fc.width = W; fc.height = H; fcx.putImageData(out, 0, 0);
+      // grow a little so the soft edge of those lines comes along too
+      for (let yy = -2; yy <= 2; yy++) for (let xx = -2; xx <= 2; xx++) mx.drawImage(fc, xx, yy);
+    }
     // the selection's box
     const a = mx.getImageData(0, 0, doc.w, doc.h).data;
     let x0 = doc.w, y0 = doc.h, x1 = -1, y1 = -1;
