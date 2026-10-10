@@ -492,16 +492,26 @@ input[type="range"] { accent-color: var(--accent); }
     if (l.base) return;
     const [c, x] = mk(); c.width = doc.w; c.height = doc.h; l.base = c; l.baseCx = x; rebuildBase(l);
   }
+  // Composite of all layers without earlier shading. Returns the colours (over the background) and,
+  // separately, how much drawing covers each pixel: shading only goes where something was drawn, never on bare background.
   function sampleWithoutShading() {
+    const draw = () => {
+      for (const l of layers) {
+        if (!l.visible) continue;
+        sampCtx.globalAlpha = l.opacity; sampCtx.globalCompositeOperation = l.blend;
+        sampCtx.drawImage(l.base || l.cv, 0, 0);
+      }
+      sampCtx.globalAlpha = 1; sampCtx.globalCompositeOperation = "source-over";
+    };
     sampCv.width = doc.w; sampCv.height = doc.h;
-    if (doc.bgVisible) { sampCtx.fillStyle = doc.bg; sampCtx.fillRect(0, 0, doc.w, doc.h); }
-    for (const l of layers) {
-      if (!l.visible) continue;
-      sampCtx.globalAlpha = l.opacity; sampCtx.globalCompositeOperation = l.blend;
-      sampCtx.drawImage(l.base || l.cv, 0, 0);
-    }
-    sampCtx.globalAlpha = 1; sampCtx.globalCompositeOperation = "source-over";
-    return sampCtx.getImageData(0, 0, doc.w, doc.h).data;
+    draw();
+    const raw = sampCtx.getImageData(0, 0, doc.w, doc.h).data, cover = new Uint8Array(doc.w * doc.h);
+    for (let i = 0; i < cover.length; i++) cover[i] = raw[i * 4 + 3];
+    if (!doc.bgVisible) return { data: raw, cover };
+    sampCtx.clearRect(0, 0, doc.w, doc.h);
+    sampCtx.fillStyle = doc.bg; sampCtx.fillRect(0, 0, doc.w, doc.h);
+    draw();
+    return { data: sampCtx.getImageData(0, 0, doc.w, doc.h).data, cover };
   }
   // Extends the stroke's coverage mask with the newest points, then recolours the touched area from the snapshot.
   function shadeSegment(L) {
@@ -516,10 +526,11 @@ input[type="range"] { accent-color: var(--accent); }
     const bw = clamp(Math.ceil(x1 + pad), 0, doc.w) - bx, bh = clamp(Math.ceil(y1 + pad), 0, doc.h) - by;
     if (bw <= 0 || bh <= 0) return;
     const m = mctx.getImageData(bx, by, bw, bh).data, out = lctx.createImageData(bw, bh), o = out.data;
-    const src = L.shade.sample, cur = L.shade.cur, cache = L.shade.cache;
+    const src = L.shade.sample.data, cover = L.shade.sample.cover, cur = L.shade.cur, cache = L.shade.cache;
     for (let yy = 0; yy < bh; yy++) for (let xx = 0; xx < bw; xx++) {
       const q = (yy * bw + xx) * 4, a = m[q + 3]; if (!a) continue;
-      const s = ((by + yy) * doc.w + bx + xx) * 4, sa = src[s + 3] / 255;
+      const pi = (by + yy) * doc.w + bx + xx, cv = cover[pi]; if (!cv) continue;
+      const s = pi * 4, sa = src[s + 3] / 255;
       const r0 = Math.round(src[s] * sa + 255 * (1 - sa)), g0 = Math.round(src[s + 1] * sa + 255 * (1 - sa)), b0 = Math.round(src[s + 2] * sa + 255 * (1 - sa));
       const key = (r0 << 16) | (g0 << 8) | b0;
       let c = cache.get(key);
@@ -530,7 +541,7 @@ input[type="range"] { accent-color: var(--accent); }
       const pr = cur[s] * ca + 255 * (1 - ca) - r0, pg = cur[s + 1] * ca + 255 * (1 - ca) - g0, pb = cur[s + 2] * ca + 255 * (1 - ca) - b0;
       const dr = c[0] - r0, dg = c[1] - g0, db = c[2] - b0, dd = dr * dr + dg * dg + db * db;
       const have = dd > 9 ? clamp((pr * dr + pg * dg + pb * db) / dd, 0, 1) : 0;
-      const want = L.shade.soft ? Math.min(1, a / 255 * 1.8) : a / 255; // soft dabs never fully overlap, so lift the core to full strength
+      const want = (L.shade.soft ? Math.min(1, a / 255 * 1.8) : a / 255) * cv / 255; // soft dabs never fully overlap, so lift the core to full strength; fade out where the drawing itself fades
       if (want <= have + 0.004) continue;
       o[q] = c[0]; o[q + 1] = c[1]; o[q + 2] = c[2]; o[q + 3] = Math.round(255 * (want - have) / (1 - have));
     }
