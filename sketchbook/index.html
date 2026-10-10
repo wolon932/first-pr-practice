@@ -1,0 +1,1435 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#1d1e21">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="스케치북">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<style>
+/* home-screen app: keep the toolbars clear of the notch and home indicator, no page bounce or long-press menus */
+.app { box-sizing: border-box; padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
+html, body { overscroll-behavior: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+input, textarea { -webkit-user-select: text; user-select: text; }
+</style>
+<title>나의 스케치북</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;600&family=Gowun+Dodum&family=Black+Han+Sans&family=Do+Hyeon&family=Gaegu:wght@400;700&family=Nanum+Pen+Script&family=Nanum+Myeongjo:wght@400;700&display=swap">
+<style>
+/* Layout: painting-app shell. Top bar, contextual tool options, left tool rail, centre workspace with a zoomable canvas,
+   right panel (color + layers). Deliberately single dark theme, like most painting apps, so the artwork stands out. */
+:root {
+  --app: #1d1e21;
+  --panel: #26272b;
+  --raised: #313338;
+  --hover: #3a3c42;
+  --work: #151618;
+  --line: #3b3d43;
+  --text: #e9eaee;
+  --muted: #9b9ea6;
+  --accent: #4d8dff;
+  --accent-soft: rgba(77, 141, 255, .18);
+  --font-ui: "IBM Plex Sans KR", system-ui, -apple-system, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+  color-scheme: dark;
+}
+html, body { height: 100%; }
+[hidden] { display: none !important; }
+body { background: var(--app); color: var(--text); font-family: var(--font-ui); font-size: 13px; overflow: hidden; }
+.app { height: 100%; display: flex; flex-direction: column; }
+
+button, select, input { font: inherit; color: inherit; }
+button {
+  background: transparent; border: 1px solid transparent; border-radius: 8px; padding: 0 10px; min-height: 32px;
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px; cursor: pointer; white-space: nowrap;
+}
+button:hover { background: var(--hover); }
+button:disabled { opacity: .35; cursor: default; background: transparent; }
+button[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent); border-color: rgba(77,141,255,.4); }
+button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.icon { padding: 0; width: 34px; min-height: 34px; }
+svg.i { width: 18px; height: 18px; stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+.primary { background: var(--accent); color: #fff; font-weight: 600; }
+.primary:hover { background: #3f7ef0; }
+select, input[type="number"], input[type="text"] {
+  background: var(--raised); border: 1px solid var(--line); border-radius: 6px; padding: 4px 6px; min-height: 28px; box-sizing: border-box;
+}
+input[type="range"] { accent-color: var(--accent); }
+
+/* top bar */
+.top { display: flex; align-items: center; gap: 4px; padding: 6px 10px; background: var(--panel); border-bottom: 1px solid var(--line); min-height: 48px; box-sizing: border-box; }
+.brand { font-weight: 600; font-size: 14px; padding: 0 8px 0 2px; letter-spacing: -.01em; }
+.brand b { color: var(--accent); font-weight: 600; }
+.vsep { width: 1px; height: 22px; background: var(--line); margin: 0 4px; }
+.spacer { flex: 1; }
+.zoom { display: flex; align-items: center; background: var(--raised); border-radius: 8px; }
+#zoom-val { min-width: 58px; font-variant-numeric: tabular-nums; }
+.docsize { color: var(--muted); font-variant-numeric: tabular-nums; padding: 0 6px; }
+
+/* options bar */
+.opts { display: flex; align-items: center; gap: 14px; padding: 6px 12px; background: var(--app); border-bottom: 1px solid var(--line); min-height: 44px; box-sizing: border-box; overflow-x: auto; white-space: nowrap; }
+.opts .hint { color: var(--muted); }
+.seg { display: inline-flex; background: var(--raised); border-radius: 8px; padding: 2px; gap: 2px; }
+.seg button { min-height: 28px; padding: 0 9px; border-radius: 6px; }
+.brush-btn { background: var(--raised); padding: 0 8px; gap: 8px; min-height: 34px; }
+.brush-btn[aria-expanded="true"] { border-color: var(--accent); }
+.brush-btn svg.i:first-child, .menu svg.i { width: 20px; height: 20px; }
+.brush-btn canvas, .menu canvas { width: 52px; height: 22px; border-radius: 4px; background: #f4f4f1; flex: none; }
+.brush-btn span { min-width: 4.5em; text-align: left; }
+.menu { position: fixed; z-index: 20; width: 220px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 4px; box-shadow: 0 12px 32px rgba(0,0,0,.5); display: flex; flex-direction: column; gap: 2px; }
+.menu button { justify-content: flex-start; gap: 10px; min-height: 40px; padding: 0 10px; }
+.menu button[aria-selected="true"] { background: var(--accent); color: #fff; }
+.seg button[aria-pressed="true"] { background: var(--accent); color: #fff; border-color: transparent; }
+.sl { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); }
+.sl input[type="range"] { width: 120px; }
+.sl output { color: var(--text); min-width: 40px; font-variant-numeric: tabular-nums; }
+.sticker { font-size: 20px; width: 34px; padding: 0 !important; font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif; }
+
+/* body */
+.body { flex: 1; min-height: 0; display: flex; position: relative; }
+.rail { width: 52px; flex: none; background: var(--panel); border-right: 1px solid var(--line); display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 8px 0; box-sizing: border-box; }
+.rail .tool { width: 40px; min-height: 40px; padding: 0; border-radius: 10px; flex: none; }
+.rail .tool svg.i { width: 20px; height: 20px; }
+.rail .tool[aria-pressed="true"] { background: var(--accent); color: #fff; border-color: transparent; }
+.chips { margin-top: auto; position: relative; width: 40px; height: 44px; flex: none; }
+.chip { position: absolute; width: 26px; height: 26px; border-radius: 6px; border: 2px solid var(--panel); box-shadow: 0 0 0 1px var(--line); padding: 0; min-height: 0; }
+#chip1 { left: 0; top: 0; z-index: 1; }
+#chip2 { right: 0; bottom: 0; }
+
+.work { flex: 1; min-width: 0; position: relative; background: var(--work); overflow: hidden; }
+#view { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; display: block; }
+#text-input {
+  position: absolute; z-index: 2; background: rgba(77,141,255,.08); border: 1px dashed var(--accent); outline: none;
+  resize: none; overflow: hidden; padding: 0; margin: 0; line-height: 1.25; white-space: pre; min-width: 40px;
+}
+
+/* right panel */
+.panel { width: 268px; flex: none; background: var(--panel); border-left: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+.panel section { padding: 12px; border-bottom: 1px solid var(--line); display: flex; flex-direction: column; gap: 10px; }
+.panel h3 { margin: 0; font-size: 12px; font-weight: 600; color: var(--muted); letter-spacing: .06em; display: flex; align-items: center; justify-content: space-between; min-height: 20px; }
+.sv { position: relative; height: 150px; border-radius: 8px; overflow: hidden; touch-action: none; cursor: crosshair; }
+.sv canvas, .hue canvas { width: 100%; height: 100%; display: block; }
+.knob { position: absolute; width: 14px; height: 14px; border-radius: 50%; border: 2px solid #fff; box-shadow: 0 0 0 1px rgba(0,0,0,.5); transform: translate(-50%, -50%); pointer-events: none; }
+.hue { position: relative; height: 14px; border-radius: 7px; overflow: visible; touch-action: none; cursor: pointer; }
+.hue canvas { border-radius: 7px; }
+.hue .knob { top: 50%; width: 10px; height: 18px; border-radius: 4px; }
+.hexrow { display: flex; align-items: center; gap: 8px; }
+.hexrow .cur { width: 28px; height: 28px; border-radius: 6px; box-shadow: inset 0 0 0 1px rgba(255,255,255,.15); }
+#hex { width: 92px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; text-transform: uppercase; }
+.swatches { display: grid; grid-template-columns: repeat(9, 1fr); gap: 4px; min-height: 22px; }
+.swatches button { min-height: 0; aspect-ratio: 1; padding: 0; border-radius: 4px; box-shadow: inset 0 0 0 1px rgba(255,255,255,.12); }
+.swatches button:hover { transform: scale(1.1); }
+.sublabel { color: var(--muted); font-size: 11px; }
+
+.layers-sec { flex: 1; min-height: 0; border-bottom: none !important; }
+.layer-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; overflow-y: auto; min-height: 60px; flex: 1; }
+.layer { display: flex; align-items: center; gap: 6px; padding: 4px; border-radius: 8px; border: 1px solid transparent; cursor: pointer; background: var(--raised); }
+.layer[aria-selected="true"] { border-color: var(--accent); background: #2f3a52; }
+.layer canvas { width: 52px; height: 38px; border-radius: 4px; flex: none; background: repeating-conic-gradient(#c9ccd2 0 25%, #f2f3f5 0 50%) 0 0 / 10px 10px; }
+.layer .meta { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.layer .name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.layer .sub { color: var(--muted); font-size: 11px; }
+.layer .eye { width: 28px; min-height: 28px; padding: 0; }
+.layer .eye[aria-pressed] { background: transparent; border-color: transparent; color: var(--text); }
+.layer .eye[aria-pressed="false"] { opacity: .45; }
+.layer input[type="text"] { width: 100%; }
+.bgrow { cursor: default; flex: none; }
+.bgrow input[type="color"] { width: 52px; height: 38px; border: none; padding: 0; background: none; border-radius: 4px; cursor: pointer; }
+.props { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 6px 8px; color: var(--muted); }
+.props select { width: 100%; }
+.props output { color: var(--text); min-width: 36px; text-align: right; font-variant-numeric: tabular-nums; }
+.layer-actions { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
+.layer-actions button { padding: 0; }
+
+/* overlays */
+.toast { position: absolute; left: 50%; bottom: 16px; transform: translateX(-50%); z-index: 5; background: #000c; color: #fff; padding: 8px 14px; border-radius: 999px; max-width: calc(100% - 32px); text-align: center; }
+.modal { position: fixed; inset: 0; z-index: 10; background: rgba(0,0,0,.6); display: grid; place-items: center; padding: 16px; }
+.dialog { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 18px; width: min(420px, 100%); box-sizing: border-box; display: flex; flex-direction: column; gap: 14px; max-height: 100%; overflow: auto; }
+.dialog h2 { margin: 0; font-size: 16px; }
+.presets { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 6px; }
+.presets button { background: var(--raised); flex-direction: column; align-items: flex-start; padding: 8px 10px; gap: 2px; min-height: 0; }
+.presets button small { color: var(--muted); font-variant-numeric: tabular-nums; }
+.dims { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; color: var(--muted); }
+.dims input[type="number"] { width: 84px; }
+.dialog .row { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
+.dialog .warn { color: #ffb86b; margin: 0; }
+.preview img { max-width: 100%; max-height: 60vh; border-radius: 6px; background: repeating-conic-gradient(#c9ccd2 0 25%, #f2f3f5 0 50%) 0 0 / 16px 16px; }
+
+.mobile-only { display: none !important; }
+@media (max-width: 820px) {
+  .brand, .docsize, .top .label { display: none; }
+  .mobile-only { display: inline-flex !important; }
+  .body { flex-direction: column; }
+  .rail { order: 2; width: 100%; height: 56px; flex-direction: row; border-right: none; border-top: 1px solid var(--line); padding: 0 8px; overflow-x: auto; justify-content: flex-start; }
+  .chips { margin: 0 0 0 auto; }
+  .panel { position: absolute; right: 0; top: 0; bottom: 56px; z-index: 4; box-shadow: -8px 0 24px rgba(0,0,0,.4); max-width: calc(100% - 24px); }
+  .panel:not(.open) { display: none; }
+  .top { gap: 2px; padding: 6px; }
+}
+</style>
+</head>
+<body>
+
+<div class="app">
+  <header class="top">
+    <div class="brand">나의 <b>스케치북</b></div>
+    <button id="new-btn" title="새 캔버스"><svg class="i" viewBox="0 0 24 24"><path d="M6 3h8l5 5v13H6z"/><path d="M14 3v5h5M12.5 11v6M9.5 14h6"/></svg><span class="label">새 캔버스</span></button>
+    <span class="vsep"></span>
+    <button id="undo" class="icon" title="되돌리기 (Ctrl+Z)" aria-label="되돌리기" disabled><svg class="i" viewBox="0 0 24 24"><path d="M9 14L4 9l5-5"/><path d="M4 9h10a6 6 0 010 12h-3"/></svg></button>
+    <button id="redo" class="icon" title="다시 하기 (Ctrl+Y)" aria-label="다시 하기" disabled><svg class="i" viewBox="0 0 24 24"><path d="M15 14l5-5-5-5"/><path d="M20 9H10a6 6 0 000 12h3"/></svg></button>
+    <div class="spacer"></div>
+    <div class="zoom">
+      <button id="zoom-out" class="icon" title="축소 (-)" aria-label="축소"><svg class="i" viewBox="0 0 24 24"><path d="M6 12h12"/></svg></button>
+      <button id="zoom-val" title="100%로 보기">100%</button>
+      <button id="zoom-in" class="icon" title="확대 (+)" aria-label="확대"><svg class="i" viewBox="0 0 24 24"><path d="M12 6v12M6 12h12"/></svg></button>
+    </div>
+    <button id="fit" class="icon" title="화면에 맞추기 (Ctrl+0)" aria-label="화면에 맞추기"><svg class="i" viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
+    <button id="flip" class="icon" title="좌우 반전해서 보기" aria-label="좌우 반전해서 보기" aria-pressed="false"><svg class="i" viewBox="0 0 24 24"><path d="M12 3v18"/><path d="M8 7l-5 5 5 5z"/><path d="M16 7l5 5-5 5z"/></svg></button>
+    <button id="sym" class="icon" title="좌우 대칭 그리기" aria-label="좌우 대칭 그리기" aria-pressed="false"><svg class="i" viewBox="0 0 24 24"><path d="M12 3v18" stroke-dasharray="2 3"/><path d="M9 7c-3 1-4 3-4 5s1 4 4 5"/><path d="M15 7c3 1 4 3 4 5s-1 4-4 5"/></svg></button>
+    <button id="input-mode" aria-pressed="false"></button>
+    <span class="docsize" id="docsize"></span>
+    <div class="spacer"></div>
+    <button id="panel-toggle" class="icon mobile-only" title="색상·레이어" aria-label="색상과 레이어 패널"><svg class="i" viewBox="0 0 24 24"><path d="M12 3l9 5-9 5-9-5z"/><path d="M3 13l9 5 9-5"/></svg></button>
+    <button id="save" class="primary" title="PNG로 저장 (Ctrl+S)"><svg class="i" viewBox="0 0 24 24"><path d="M12 4v11"/><path d="M7 10l5 5 5-5"/><path d="M5 20h14"/></svg>저장</button>
+  </header>
+
+  <div class="opts" id="opts" role="toolbar" aria-label="도구 설정"></div>
+
+  <div class="body">
+    <nav class="rail" id="rail" aria-label="도구">
+      <div class="chips">
+        <button class="chip" id="chip1" title="주 색상" aria-label="주 색상"></button>
+        <button class="chip" id="chip2" title="보조 색상과 바꾸기 (X)" aria-label="보조 색상과 바꾸기"></button>
+      </div>
+    </nav>
+
+    <div class="work" id="work">
+      <canvas id="view" aria-label="캔버스"></canvas>
+      <textarea id="text-input" rows="1" hidden aria-label="텍스트 입력"></textarea>
+      <div class="toast" id="toast" hidden></div>
+    </div>
+
+    <aside class="panel" id="panel" aria-label="색상과 레이어">
+      <section>
+        <h3>색상 <button id="panel-close" class="icon mobile-only" aria-label="패널 닫기"><svg class="i" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button></h3>
+        <div class="sv" id="sv"><canvas id="sv-cv" width="244" height="150"></canvas><i class="knob" id="sv-knob"></i></div>
+        <div class="hue" id="hue"><canvas id="hue-cv" width="244" height="14"></canvas><i class="knob" id="hue-knob"></i></div>
+        <div class="hexrow"><span class="cur" id="cur"></span><input type="text" id="hex" maxlength="7" aria-label="색상 코드" spellcheck="false"></div>
+        <div class="swatches" id="palette" aria-label="팔레트"></div>
+        <span class="sublabel">최근 사용한 색</span>
+        <div class="swatches" id="recent" aria-label="최근 사용한 색"></div>
+      </section>
+      <section class="layers-sec">
+        <h3>레이어 <span class="sublabel" id="layer-count"></span></h3>
+        <ul class="layer-list" id="layer-list" role="listbox" aria-label="레이어 목록"></ul>
+        <div class="layer bgrow">
+          <button class="eye" id="bg-eye" aria-pressed="true" title="배경 보이기/숨기기 (숨기면 투명 PNG로 저장)" aria-label="배경 보이기"><svg class="i" viewBox="0 0 24 24"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></button>
+          <input type="color" id="bg-color" value="#ffffff" aria-label="배경색">
+          <div class="meta"><span class="name">배경</span><span class="sub" id="bg-sub">흰색</span></div>
+        </div>
+        <div class="props">
+          <span>합성</span><select id="blend" aria-label="합성 모드"></select><span></span>
+          <span>불투명도</span><input type="range" id="layer-opacity" min="0" max="100" aria-label="레이어 불투명도"><output id="layer-opacity-out"></output>
+        </div>
+        <div class="layer-actions">
+          <button id="l-add" title="새 레이어" aria-label="새 레이어"><svg class="i" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
+          <button id="l-dup" title="레이어 복제" aria-label="레이어 복제"><svg class="i" viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M4 16V6a2 2 0 012-2h10"/></svg></button>
+          <button id="l-merge" title="아래 레이어와 합치기" aria-label="아래 레이어와 합치기"><svg class="i" viewBox="0 0 24 24"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg></button>
+          <button id="l-clear" title="레이어 비우기" aria-label="레이어 비우기"><svg class="i" viewBox="0 0 24 24"><path d="M7 20h12"/><path d="M5 15l9-9 5 5-8 8H8z"/></svg></button>
+          <button id="l-up" title="위로" aria-label="레이어 위로"><svg class="i" viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6"/></svg></button>
+          <button id="l-down" title="아래로" aria-label="레이어 아래로"><svg class="i" viewBox="0 0 24 24"><path d="M12 5v14M6 13l6 6 6-6"/></svg></button>
+          <button id="l-del" title="레이어 삭제" aria-label="레이어 삭제"><svg class="i" viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></svg></button>
+        </div>
+      </section>
+    </aside>
+  </div>
+
+  <div class="menu" id="brush-menu" role="listbox" aria-label="브러시 종류" hidden></div>
+
+  <div class="modal" id="new-modal" hidden>
+    <div class="dialog" role="dialog" aria-label="새 캔버스">
+      <h2>새 캔버스</h2>
+      <div class="presets" id="presets"></div>
+      <div class="dims">
+        <label>가로 <input type="number" id="new-w" min="64" max="3000"></label>
+        <label>세로 <input type="number" id="new-h" min="64" max="3000"></label>
+        <span>px (최대 3000)</span>
+      </div>
+      <div class="dims">
+        <label>배경색 <input type="color" id="new-bg" value="#ffffff"></label>
+        <label><input type="checkbox" id="new-transparent"> 투명 배경</label>
+      </div>
+      <p class="warn">지금 캔버스의 그림은 사라져요. 필요하면 먼저 저장하세요.</p>
+      <div class="row"><button id="new-cancel">취소</button><button id="new-ok" class="primary">만들기</button></div>
+    </div>
+  </div>
+
+  <div class="modal preview" id="preview" hidden>
+    <div class="dialog">
+      <h2>그림 저장</h2>
+      <img id="preview-img" alt="저장할 그림">
+      <p class="sublabel">이 화면에서는 바로 저장이 안 돼요. 그림을 길게 누르거나 오른쪽 클릭해서 저장하세요.</p>
+      <div class="row"><button id="preview-close" class="primary">닫기</button></div>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const svg = d => `<svg class="i" viewBox="0 0 24 24">${d}</svg>`;
+
+  /* ---------------- constants ---------------- */
+  const TOOLS = [
+    ["move", "이동", "V", '<path d="M12 3v18M3 12h18M12 3l-3 3M12 3l3 3M12 21l-3-3M12 21l3-3M3 12l3-3M3 12l3 3M21 12l-3-3M21 12l-3 3"/>'],
+    ["hand", "손", "H", '<path d="M8 13V6a1.5 1.5 0 013 0v5M11 10.5V4.5a1.5 1.5 0 013 0V11M14 11V6a1.5 1.5 0 013 0v7c0 4.5-2.5 8-7 8-3 0-4.5-1.5-6-4l-2-3.5a1.5 1.5 0 012.6-1.5L8 15"/>'],
+    ["brush", "브러시", "B", '<path d="M19 3l2 2-9.5 9.5-2-2z"/><path d="M9.5 12.5C6 12.5 5.5 15 5.5 16.5 5.5 18 4.5 19.5 3 20c3.5 1 8 .5 8.5-4"/>'],
+    ["eraser", "지우개", "E", '<path d="M7 20h12"/><path d="M5 15l9-9 5 5-8 8H8z"/><path d="M9.5 10.5l5 5"/>'],
+    ["fill", "채우기", "G", '<path d="M5 11l7-7 7 7-7 7z"/><path d="M5 11h14"/><path d="M20.5 15s2 2.5 2 4a2 2 0 01-4 0c0-1.5 2-4 2-4z"/>'],
+    ["picker", "스포이트", "I", '<path d="M14 4.5l5.5 5.5"/><path d="M16 3a2.1 2.1 0 013 0l2 2a2.1 2.1 0 010 3l-2.5 2.5-5-5z"/><path d="M13.5 8.5L5 17v3h3l8.5-8.5"/>'],
+    ["shape", "도형", "U", '<rect x="3" y="3" width="10" height="10" rx="1"/><circle cx="16" cy="16" r="5"/>'],
+    ["text", "텍스트", "T", '<path d="M5 7V4h14v3M12 4v16M9 20h6"/>'],
+    ["sticker", "스티커", "S", '<path d="M12 3l2.6 5.6 6 .7-4.5 4.1 1.3 6L12 16.4 6.6 19.4l1.3-6L3.4 9.3l6-.7z"/>'],
+  ];
+  const BRUSHES = [
+    ["pen", "펜", '<path d="M16 3l5 5L9 20H4v-5z"/><path d="M13.5 5.5l5 5"/><path d="M4 20l3-3"/>'],
+    ["pencil", "연필", '<path d="M8.5 19.5L4 20l.5-4.5L15.5 4.5a2.1 2.1 0 013 0l1 1a2.1 2.1 0 010 3z"/><path d="M4.5 15.5l4 4"/><path d="M13.5 6.5l4 4"/><path d="M4 20l.25-2.25 2 2z" fill="currentColor"/>'],
+    ["marker", "마커", '<path d="M10 2.5h4l1 4H9z"/><path d="M8 6.5h8v14a1 1 0 01-1 1H9a1 1 0 01-1-1z"/><path d="M8 11h8"/><path d="M11 2.5L12 1h0l1 1.5"/>'],
+    ["air", "에어브러시", '<rect x="5" y="10" width="9" height="11" rx="2"/><path d="M7 10V7h5v3"/><path d="M9.5 7V4.5h2"/><circle cx="16.5" cy="4.5" r=".7" fill="currentColor"/><circle cx="19" cy="3" r=".7" fill="currentColor"/><circle cx="19.5" cy="6" r=".7" fill="currentColor"/><circle cx="21.5" cy="4.5" r=".7" fill="currentColor"/><circle cx="17" cy="7.5" r=".7" fill="currentColor"/>'],
+    ["ink", "붓펜", '<path d="M21 3c-3.5 1.5-8.5 6-10.5 9l2 2c3-2 7.5-7 8.5-11z"/><path d="M10.5 12C8 12 6.5 13.5 6.5 15.5c0 1.5-1 3-2.5 3.5 3 1.2 7.5.5 8.5-5"/>'],
+    ["shade", "음영 펜", '<path d="M16 3l5 5-9 9-5-5z"/><path d="M7 12l-3 9 9-3"/><circle cx="18.5" cy="18.5" r="3"/><path d="M18.5 15.5a3 3 0 010 6z" fill="currentColor"/>'],
+  ];
+  const BRUSH_PREVIEW = { pen: 3, pencil: 3, marker: 9, air: 14, ink: 7, shade: 9 };
+  const PALETTE = ["#000000", "#4a4d55", "#9aa0aa", "#ffffff", "#e23b3b", "#ff7a2f", "#ffc531", "#ffe7a3", "#3fb950",
+                   "#1f8a70", "#45b7e8", "#2f6fde", "#6a4be0", "#b44fd6", "#ff6fae", "#f2c1a0", "#8b5a3c", "#3a2a20"];
+  const BLENDS = [["source-over", "보통"], ["multiply", "곱하기"], ["screen", "스크린"], ["overlay", "오버레이"], ["darken", "어둡게"],
+                  ["lighten", "밝게"], ["color-dodge", "닷지"], ["color-burn", "번"], ["soft-light", "소프트 라이트"],
+                  ["hard-light", "하드 라이트"], ["difference", "차이"], ["hue", "색조"], ["color", "색상"], ["luminosity", "광도"]];
+  const FONTS = [["Gowun Dodum", "고운돋움"], ["Black Han Sans", "검은고딕"], ["Do Hyeon", "도현"], ["Gaegu", "개구"],
+                 ["Nanum Pen Script", "나눔손글씨 펜"], ["Nanum Myeongjo", "나눔명조"]];
+  const SHAPES = [
+    ["rect", "사각형", '<rect x="4" y="5" width="16" height="14" rx="1"/>'],
+    ["ellipse", "원", '<ellipse cx="12" cy="12" rx="9" ry="7"/>'],
+    ["triangle", "삼각형", '<path d="M12 4l9 16H3z"/>'],
+    ["star", "별", '<path d="M12 3l2.6 5.6 6 .7-4.5 4.1 1.3 6L12 16.4 6.6 19.4l1.3-6L3.4 9.3l6-.7z"/>'],
+    ["line", "직선", '<path d="M4 20L20 4"/>'],
+    ["arrow", "화살표", '<path d="M4 20L20 4M11 4h9v9"/>'],
+  ];
+  const STICKERS = ["⭐", "❤️", "🌸", "🍉", "🐱", "🐶", "🐰", "☀️", "🌈", "☁️", "🎈", "🍀", "🦋", "🎵", "🍓", "👑", "✨", "💬"];
+  const EMOJI_FONT = '"Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif';
+  const MAX_LAYERS = 20, MAX_HISTORY = 100, WORK_BG = "#151618";
+
+  /* ---------------- state ---------------- */
+  const S = {
+    tool: "brush", brush: "pen",
+    brushSize: { pen: 8, pencil: 4, marker: 28, air: 80, ink: 16, shade: 40 },
+    brushOpacity: { pen: 100, pencil: 90, marker: 50, air: 60, ink: 100, shade: 100 },
+    shadeMode: "shadow", shadeStrength: 45, shadeHue: 35, shadeSoft: true,
+    eraserSize: 40, eraserOpacity: 100, softEraser: false,
+    smooth: 30, tol: 32, fillAll: true, fillOpacity: 100,
+    shape: "rect", shapeFill: false, shapeSize: 6, shapeOpacity: 100,
+    font: "Gowun Dodum", textSize: 72, textOpacity: 100,
+    sticker: "⭐", sym: false,
+    color: "#1d1e21", color2: "#ffffff", recent: [],
+  };
+  const doc = { w: 0, h: 0, bg: "#ffffff", bgVisible: true };
+  const V = { z: 1, ox: 0, oy: 0, flip: false };
+  let layers = [], active = 0, layerSeq = 0, undoStack = [], redoStack = [];
+  let live = null, gesture = null, hover = null, spaceDown = false;
+
+  const mk = opts => { const c = document.createElement("canvas"); return [c, c.getContext("2d", opts)]; };
+  const CPU = { willReadFrequently: true }; // for canvases we read pixels back from every frame
+  const [docCv, dctx] = mk(), [tmp, tctx] = mk(), [sbuf, sctx] = mk(), [lbuf, lctx] = mk(), [mvCv, mvctx] = mk(), [maskCv, mctx] = mk(CPU);
+  const view = $("view"), vctx = view.getContext("2d"), work = $("work");
+  let dpr = 1;
+
+  /* ---------------- color helpers ---------------- */
+  const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+  function hexToRgb(h) { const n = parseInt(h.slice(1), 16); return [n >> 16 & 255, n >> 8 & 255, n & 255]; }
+  function rgbToHex(r, g, b) { return "#" + [r, g, b].map(v => clamp(Math.round(v), 0, 255).toString(16).padStart(2, "0")).join(""); }
+  function hsvToRgb(h, s, v) {
+    const f = n => { const k = (n + h / 60) % 6; return v - v * s * Math.max(0, Math.min(k, 4 - k, 1)); };
+    return [f(5) * 255, f(3) * 255, f(1) * 255];
+  }
+  function rgbToHsv(r, g, b) {
+    r /= 255; g /= 255; b /= 255;
+    const mx = Math.max(r, g, b), mn = Math.min(r, g, b), d = mx - mn;
+    let h = 0;
+    if (d) h = mx === r ? ((g - b) / d) % 6 : mx === g ? (b - r) / d + 2 : (r - g) / d + 4;
+    return { h: (h * 60 + 360) % 360, s: mx ? d / mx : 0, v: mx };
+  }
+
+  /* ---------------- brush engine ---------------- */
+  function rng(seed) { let s = seed >>> 0 || 1; return () => { s ^= s << 13; s ^= s >>> 17; s ^= s << 5; return (s >>> 0) / 4294967296; }; }
+  function makeDab(color, size) {
+    const [c, x] = mk(), r = Math.max(1, size / 2);
+    c.width = c.height = Math.ceil(r * 2);
+    const [R, G, B] = hexToRgb(color), g = x.createRadialGradient(r, r, 0, r, r, r);
+    g.addColorStop(0, `rgba(${R},${G},${B},1)`); g.addColorStop(.5, `rgba(${R},${G},${B},.5)`); g.addColorStop(1, `rgba(${R},${G},${B},0)`);
+    x.fillStyle = g; x.fillRect(0, 0, c.width, c.height);
+    return c;
+  }
+  function strokeState(op) { return { i: 0, rem: 0, rand: rng(op.seed), dab: op.brush === "air" ? makeDab(op.eraser ? "#000000" : op.color, op.size) : null }; }
+  const widthAt = (op, pt) => op.pressure ? op.size * (0.15 + 0.85 * pt[2]) : op.size;
+
+  // Draws the points of op from st.i onward into ctx (a stroke buffer), opaque. Opacity is applied when the buffer is composited.
+  function drawStroke(ctx, op, st) {
+    const p = op.points, col = op.eraser ? "#000000" : op.color, Mx = op.mirror;
+    ctx.save(); ctx.fillStyle = ctx.strokeStyle = col; ctx.lineCap = op.brush === "marker" ? "square" : "round"; ctx.lineJoin = "round";
+    const both = fn => { fn(false); if (Mx) fn(true); };
+    const X = (x, m) => m ? Mx - x : x;
+    for (; st.i < p.length; st.i++) {
+      const b = p[st.i], a = p[Math.max(0, st.i - 1)];
+      if (op.brush === "pen" || op.brush === "marker") {
+        const w = op.brush === "marker" ? op.size : widthAt(op, b);
+        both(m => {
+          if (st.i === 0) { ctx.beginPath(); ctx.arc(X(b[0], m), b[1], w / 2, 0, Math.PI * 2); ctx.fill(); return; }
+          ctx.lineWidth = w; ctx.beginPath(); ctx.moveTo(X(a[0], m), a[1]); ctx.lineTo(X(b[0], m), b[1]); ctx.stroke();
+        });
+      } else if (op.brush === "ink") {
+        const wa = widthAt(op, a) / 2, wb = widthAt(op, b) / 2, nx = Math.SQRT1_2, ny = -Math.SQRT1_2;
+        both(m => {
+          const s = m ? -1 : 1;
+          ctx.beginPath();
+          ctx.moveTo(X(a[0], m) + s * nx * wa, a[1] + ny * wa); ctx.lineTo(X(b[0], m) + s * nx * wb, b[1] + ny * wb);
+          ctx.lineTo(X(b[0], m) - s * nx * wb, b[1] - ny * wb); ctx.lineTo(X(a[0], m) - s * nx * wa, a[1] - ny * wa);
+          ctx.closePath(); ctx.fill(); ctx.lineWidth = 1; ctx.stroke();
+        });
+      } else {
+        // stamped brushes: pencil grain and airbrush
+        const w = widthAt(op, b), spacing = op.brush === "air" ? Math.max(1, w * 0.12) : Math.max(1, w * 0.35);
+        const dx = b[0] - a[0], dy = b[1] - a[1], dist = Math.hypot(dx, dy);
+        const stamp = (x, y) => {
+          if (op.brush === "air") {
+            const d = st.dab, s = w / op.size;
+            ctx.globalAlpha = 0.14;
+            both(m => ctx.drawImage(d, X(x, m) - d.width * s / 2, y - d.height * s / 2, d.width * s, d.height * s));
+            ctx.globalAlpha = 1;
+          } else {
+            const r = w / 2, n = Math.max(2, Math.ceil(r * r * 1.4));
+            for (let k = 0; k < n; k++) {
+              const ang = st.rand() * Math.PI * 2, rr = Math.sqrt(st.rand()) * r, px = x + Math.cos(ang) * rr, py = y + Math.sin(ang) * rr;
+              const sz = st.rand() < 0.5 ? 1 : 1.4;
+              both(m => ctx.fillRect(X(px, m), py, sz, sz));
+            }
+          }
+        };
+        if (st.i === 0) { stamp(b[0], b[1]); st.rem = spacing; continue; }
+        if (dist === 0) continue;
+        let t = st.rem;
+        while (t <= dist) { stamp(a[0] + dx * t / dist, a[1] + dy * t / dist); t += spacing; }
+        st.rem = t - dist;
+      }
+    }
+    ctx.restore();
+  }
+  function strokeBox(op) {
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const p of op.points) { x0 = Math.min(x0, p[0]); y0 = Math.min(y0, p[1]); x1 = Math.max(x1, p[0]); y1 = Math.max(y1, p[1]); }
+    if (op.mirror) { const a = op.mirror - x1, b = op.mirror - x0; x0 = Math.min(x0, a); x1 = Math.max(x1, b); }
+    const pad = op.size + 4;
+    const x = clamp(Math.floor(x0 - pad), 0, doc.w), y = clamp(Math.floor(y0 - pad), 0, doc.h);
+    return { x, y, w: clamp(Math.ceil(x1 + pad), 0, doc.w) - x, h: clamp(Math.ceil(y1 + pad), 0, doc.h) - y };
+  }
+  function blitStroke(c, buf, op, bb) {
+    if (bb && (bb.w <= 0 || bb.h <= 0)) return;
+    c.save(); c.globalAlpha = op.opacity; c.globalCompositeOperation = op.eraser ? "destination-out" : "source-over";
+    if (bb) c.drawImage(buf, bb.x, bb.y, bb.w, bb.h, bb.x, bb.y, bb.w, bb.h); else c.drawImage(buf, 0, 0);
+    c.restore();
+  }
+
+  /* ---------------- shading pen ---------------- */
+  // Works in OKLCH (perceptual lightness/chroma/hue) so a colour keeps reading as "the same colour, darker or lighter"
+  // instead of going muddy the way plain RGB/HSV darkening does (yellow → olive, etc.).
+  const lin = c => (c /= 255) <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+  const gam = c => 255 * (c <= 0.0031308 ? 12.92 * c : 1.055 * Math.pow(c, 1 / 2.4) - 0.055);
+  function toOklab(r, g, b) {
+    r = lin(r); g = lin(g); b = lin(b);
+    const l = Math.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b);
+    const m = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b);
+    const s = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b);
+    return [0.2104542553 * l + 0.7936177850 * m - 0.0040720468 * s, 1.9779984951 * l - 2.4285922050 * m + 0.4505937099 * s, 0.0259040371 * l + 0.7827717662 * m - 0.8086757660 * s];
+  }
+  function oklabToLinear(L, a, b) {
+    const l = (L + 0.3963377774 * a + 0.2158037573 * b) ** 3, m = (L - 0.1055613458 * a - 0.0638541728 * b) ** 3, s = (L - 0.0894841775 * a - 1.2914855480 * b) ** 3;
+    return [4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s, -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s, -0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s];
+  }
+  // k: strength 0..1, hs: hue shift 0..1. Shadows lean toward blue-violet (OKLCH ~285°), light toward warm yellow (~90°).
+  function shadeColor(r, g, b, mode = S.shadeMode, k = S.shadeStrength / 100, hs = S.shadeHue / 100) {
+    const [L0, a0, b0] = toOklab(r, g, b), C0 = Math.hypot(a0, b0);
+    let h = Math.atan2(b0, a0) * 180 / Math.PI, L, C;
+    const shift = (target, amt) => { if (C0 < 0.02) { h = target; return; } const d = ((target - h + 540) % 360) - 180; h += Math.sign(d) * Math.min(Math.abs(d), 40 * amt); };
+    if (mode === "shadow") {
+      // Very dark colours can't get darker, so they take a deep cool tone instead (black → dark indigo).
+      const dark = clamp(1 - L0 / 0.32, 0, 1);
+      L = L0 * (1 - 0.45 * k) + dark * dark * 0.6 * k;
+      C = C0 * (1 + 0.15 * k) + 0.02 * k * hs + dark * 0.07 * k;
+      shift(285, Math.max(k * hs, dark));
+    } else {
+      L = L0 + (1 - L0) * 0.6 * k;
+      C = C0 * (1 - 0.3 * k) + 0.015 * k * hs;
+      shift(90, k * hs);
+    }
+    const hr = h * Math.PI / 180;
+    let rgb;
+    for (let i = 0; i < 12; i++) { // pull chroma in until the colour fits on screen
+      rgb = oklabToLinear(L, C * Math.cos(hr), C * Math.sin(hr));
+      if (rgb.every(v => v >= -0.0005 && v <= 1.0005)) break;
+      C *= 0.85;
+    }
+    return rgb.map(v => clamp(Math.round(gam(clamp(v, 0, 1))), 0, 255));
+  }
+  // What the picture looks like with every earlier shading stroke left out, so new shading is always computed
+  // from the base colours and never stacks on top of old shading.
+  // Layers that hold shading keep a second canvas ("base") with everything except the shading, updated as ops are added.
+  const [sampCv, sampCtx] = mk(CPU);
+  function rebuildBase(l) { l.baseCx.clearRect(0, 0, doc.w, doc.h); l.ops.forEach(op => { if (!op.shade) renderOp(l.baseCx, op); }); }
+  function ensureBase(l) {
+    if (l.base) return;
+    const [c, x] = mk(); c.width = doc.w; c.height = doc.h; l.base = c; l.baseCx = x; rebuildBase(l);
+  }
+  function sampleWithoutShading() {
+    sampCv.width = doc.w; sampCv.height = doc.h;
+    if (doc.bgVisible) { sampCtx.fillStyle = doc.bg; sampCtx.fillRect(0, 0, doc.w, doc.h); }
+    for (const l of layers) {
+      if (!l.visible) continue;
+      sampCtx.globalAlpha = l.opacity; sampCtx.globalCompositeOperation = l.blend;
+      sampCtx.drawImage(l.base || l.cv, 0, 0);
+    }
+    sampCtx.globalAlpha = 1; sampCtx.globalCompositeOperation = "source-over";
+    return sampCtx.getImageData(0, 0, doc.w, doc.h).data;
+  }
+  // Extends the stroke's coverage mask with the newest points, then recolours the touched area from the snapshot.
+  function shadeSegment(L) {
+    const op = L.op, p = op.points, from = Math.max(0, L.st.i - 1);
+    if (L.st.i >= p.length) return;
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (let i = from; i < p.length; i++) { x0 = Math.min(x0, p[i][0]); y0 = Math.min(y0, p[i][1]); x1 = Math.max(x1, p[i][0]); y1 = Math.max(y1, p[i][1]); }
+    if (op.mirror) { const a = op.mirror - x1, b = op.mirror - x0; x0 = Math.min(x0, a); x1 = Math.max(x1, b); }
+    drawStroke(mctx, L.shade.maskOp, L.st);
+    const pad = op.size + 3;
+    const bx = clamp(Math.floor(x0 - pad), 0, doc.w), by = clamp(Math.floor(y0 - pad), 0, doc.h);
+    const bw = clamp(Math.ceil(x1 + pad), 0, doc.w) - bx, bh = clamp(Math.ceil(y1 + pad), 0, doc.h) - by;
+    if (bw <= 0 || bh <= 0) return;
+    const m = mctx.getImageData(bx, by, bw, bh).data, out = lctx.createImageData(bw, bh), o = out.data;
+    const src = L.shade.sample, cur = L.shade.cur, cache = L.shade.cache;
+    for (let yy = 0; yy < bh; yy++) for (let xx = 0; xx < bw; xx++) {
+      const q = (yy * bw + xx) * 4, a = m[q + 3]; if (!a) continue;
+      const s = ((by + yy) * doc.w + bx + xx) * 4, sa = src[s + 3] / 255;
+      const r0 = Math.round(src[s] * sa + 255 * (1 - sa)), g0 = Math.round(src[s + 1] * sa + 255 * (1 - sa)), b0 = Math.round(src[s + 2] * sa + 255 * (1 - sa));
+      const key = (r0 << 16) | (g0 << 8) | b0;
+      let c = cache.get(key);
+      if (!c) { c = shadeColor(r0, g0, b0, L.shade.mode, L.shade.k, L.shade.hs); cache.set(key, c); }
+      // How much of this target colour is already showing from earlier shading (0..1). Only top up the difference,
+      // so overlapping shading — including soft edges — never builds up darker than one stroke.
+      const ca = cur[s + 3] / 255;
+      const pr = cur[s] * ca + 255 * (1 - ca) - r0, pg = cur[s + 1] * ca + 255 * (1 - ca) - g0, pb = cur[s + 2] * ca + 255 * (1 - ca) - b0;
+      const dr = c[0] - r0, dg = c[1] - g0, db = c[2] - b0, dd = dr * dr + dg * dg + db * db;
+      const have = dd > 9 ? clamp((pr * dr + pg * dg + pb * db) / dd, 0, 1) : 0;
+      const want = L.shade.soft ? Math.min(1, a / 255 * 1.8) : a / 255; // soft dabs never fully overlap, so lift the core to full strength
+      if (want <= have + 0.004) continue;
+      o[q] = c[0]; o[q + 1] = c[1]; o[q + 2] = c[2]; o[q + 3] = Math.round(255 * (want - have) / (1 - have));
+    }
+    lctx.putImageData(out, bx, by);
+  }
+
+  function shapePath(c, s) {
+    const { x1, y1, x2, y2 } = s, l = Math.min(x1, x2), t = Math.min(y1, y2), w = Math.abs(x2 - x1), h = Math.abs(y2 - y1);
+    c.beginPath();
+    if (s.shape === "rect") c.rect(l, t, w, h);
+    else if (s.shape === "ellipse") c.ellipse(l + w / 2, t + h / 2, w / 2, h / 2, 0, 0, Math.PI * 2);
+    else if (s.shape === "triangle") { c.moveTo(l + w / 2, t); c.lineTo(l + w, t + h); c.lineTo(l, t + h); c.closePath(); }
+    else if (s.shape === "star") {
+      for (let i = 0; i < 10; i++) {
+        const a = -Math.PI / 2 + i * Math.PI / 5, r = i % 2 ? 0.4 : 1;
+        const x = l + w / 2 + Math.cos(a) * w / 2 * r, y = t + h / 2 + Math.sin(a) * h / 2 * r;
+        i ? c.lineTo(x, y) : c.moveTo(x, y);
+      }
+      c.closePath();
+    } else { c.moveTo(x1, y1); c.lineTo(x2, y2); }
+  }
+  function renderOp(c, op) {
+    if (op.kind === "stroke") {
+      const bb = strokeBox(op);
+      if (bb.w <= 0 || bb.h <= 0) return;
+      sctx.clearRect(bb.x, bb.y, bb.w, bb.h);
+      drawStroke(sctx, op, strokeState(op));
+      blitStroke(c, sbuf, op, bb);
+      return;
+    }
+    if (op.kind === "move") {
+      mvctx.clearRect(0, 0, doc.w, doc.h); mvctx.drawImage(c.canvas, 0, 0);
+      c.clearRect(0, 0, doc.w, doc.h); c.drawImage(mvCv, op.dx, op.dy);
+      return;
+    }
+    c.save();
+    c.globalAlpha = op.opacity == null ? 1 : op.opacity;
+    c.strokeStyle = c.fillStyle = op.color || "#000";
+    if (op.kind === "shape") {
+      c.lineWidth = op.size; c.lineCap = "round"; c.lineJoin = "round";
+      shapePath(c, op);
+      const closed = !["line", "arrow"].includes(op.shape);
+      if (closed && op.filled) c.fill(); else c.stroke();
+      if (op.shape === "arrow") {
+        const a = Math.atan2(op.y2 - op.y1, op.x2 - op.x1), L = Math.max(14, op.size * 3.5);
+        c.beginPath();
+        c.moveTo(op.x2 - L * Math.cos(a - .45), op.y2 - L * Math.sin(a - .45)); c.lineTo(op.x2, op.y2);
+        c.lineTo(op.x2 - L * Math.cos(a + .45), op.y2 - L * Math.sin(a + .45)); c.stroke();
+      }
+    } else if (op.kind === "sticker") {
+      c.font = `${op.size}px ${EMOJI_FONT}`; c.textAlign = "center"; c.textBaseline = "middle";
+      c.fillText(op.emoji, op.x, op.y);
+    } else if (op.kind === "text") {
+      c.font = `${op.size}px "${op.font}", sans-serif`; c.textBaseline = "top";
+      op.text.split("\n").forEach((line, i) => c.fillText(line, op.x, op.y + i * op.size * 1.25));
+    } else if (op.kind === "fill") {
+      c.drawImage(op.img, op.x, op.y);
+    } else if (op.kind === "image") {
+      c.globalCompositeOperation = op.blend || "source-over";
+      c.drawImage(op.img, 0, 0);
+    }
+    c.restore();
+  }
+
+  /* ---------------- layers ---------------- */
+  function makeLayer(name) {
+    const [cv, cx] = mk(); cv.width = doc.w; cv.height = doc.h;
+    layerSeq++;
+    return { id: layerSeq, name: name || "레이어 " + layerSeq, visible: true, opacity: 1, blend: "source-over", ops: [], cv, cx };
+  }
+  const activeLayer = () => layers.find(l => l.id === active);
+  function rebuild(l) { l.cx.clearRect(0, 0, doc.w, doc.h); l.ops.forEach(op => renderOp(l.cx, op)); if (l.base) rebuildBase(l); }
+
+  /* ---------------- rendering ---------------- */
+  function renderDoc() {
+    if (live && live.shade) shadeSegment(live);
+    dctx.globalAlpha = 1; dctx.globalCompositeOperation = "source-over";
+    if (doc.bgVisible) { dctx.fillStyle = doc.bg; dctx.fillRect(0, 0, doc.w, doc.h); } else dctx.clearRect(0, 0, doc.w, doc.h);
+    for (const l of layers) {
+      if (!l.visible) continue;
+      let src = l.cv;
+      if (live && live.layer === l) {
+        tctx.clearRect(0, 0, doc.w, doc.h);
+        if (live.kind === "move") tctx.drawImage(l.cv, live.dx, live.dy);
+        else {
+          tctx.drawImage(l.cv, 0, 0);
+          if (live.kind === "stroke") blitStroke(tctx, lbuf, live.op, null); else renderOp(tctx, live.op);
+        }
+        src = tmp;
+      }
+      dctx.globalAlpha = l.opacity; dctx.globalCompositeOperation = l.blend;
+      dctx.drawImage(src, 0, 0);
+    }
+    dctx.globalAlpha = 1; dctx.globalCompositeOperation = "source-over";
+  }
+  let checker = null;
+  function renderView() {
+    const W = view.width, H = view.height;
+    vctx.setTransform(1, 0, 0, 1, 0, 0);
+    vctx.fillStyle = WORK_BG; vctx.fillRect(0, 0, W, H);
+    if (!doc.w) return;
+    vctx.setTransform(new DOMMatrix([dpr, 0, 0, dpr, 0, 0]).multiply(M()));
+    vctx.save(); vctx.shadowColor = "rgba(0,0,0,.55)"; vctx.shadowBlur = 24 * dpr; vctx.fillStyle = "#ffffff";
+    vctx.fillRect(0, 0, doc.w, doc.h); vctx.restore();
+    if (!doc.bgVisible) {
+      if (!checker) { const [c, x] = mk(); c.width = c.height = 16; x.fillStyle = "#f2f3f5"; x.fillRect(0, 0, 16, 16); x.fillStyle = "#c9ccd2"; x.fillRect(0, 0, 8, 8); x.fillRect(8, 8, 8, 8); checker = vctx.createPattern(c, "repeat"); }
+      checker.setTransform(new DOMMatrix().scale(1 / V.z));
+      vctx.fillStyle = checker; vctx.fillRect(0, 0, doc.w, doc.h);
+    }
+    vctx.imageSmoothingEnabled = V.z < 2;
+    vctx.drawImage(docCv, 0, 0);
+    vctx.imageSmoothingEnabled = true;
+    if (S.sym) {
+      vctx.save(); vctx.strokeStyle = "rgba(77,141,255,.8)"; vctx.lineWidth = 1.5 / V.z; vctx.setLineDash([8 / V.z, 6 / V.z]);
+      vctx.beginPath(); vctx.moveTo(doc.w / 2, 0); vctx.lineTo(doc.w / 2, doc.h); vctx.stroke(); vctx.restore();
+    }
+    if (hover && (S.tool === "brush" || S.tool === "eraser") && !(gesture && gesture.type === "pan") && !spaceDown) {
+      const r = Math.max(1, curSize() / 2);
+      vctx.lineWidth = 1 / V.z;
+      vctx.strokeStyle = "rgba(0,0,0,.6)"; vctx.beginPath(); vctx.arc(hover.x, hover.y, r, 0, Math.PI * 2); vctx.stroke();
+      vctx.strokeStyle = "rgba(255,255,255,.8)"; vctx.beginPath(); vctx.arc(hover.x, hover.y, r + 1 / V.z, 0, Math.PI * 2); vctx.stroke();
+    }
+    $("zoom-val").textContent = Math.round(V.z * 100) + "%";
+  }
+  let rafId = 0, docDirty = false;
+  function requestRender(docToo) {
+    if (docToo) docDirty = true;
+    if (rafId) return;
+    rafId = requestAnimationFrame(() => { rafId = 0; if (docDirty) { renderDoc(); docDirty = false; } renderView(); });
+  }
+
+  /* ---------------- view transform ---------------- */
+  function M() { let m = new DOMMatrix().translate(V.ox, V.oy).scale(V.z); if (V.flip) m = m.translate(doc.w, 0).scale(-1, 1); return m; }
+  function screenPt(e) { const r = view.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; }
+  function toDoc(sp) { const p = M().inverse().transformPoint(new DOMPoint(sp.x, sp.y)); return { x: p.x, y: p.y }; }
+  function anchorAt(d, sp) { V.ox = V.oy = 0; const p = M().transformPoint(new DOMPoint(d.x, d.y)); V.ox = sp.x - p.x; V.oy = sp.y - p.y; }
+  function zoomAt(sp, z) { const d = toDoc(sp); V.z = clamp(z, 0.05, 32); anchorAt(d, sp); repositionText(); requestRender(); }
+  const wsCenter = () => ({ x: view.clientWidth / 2, y: view.clientHeight / 2 });
+  function fit() {
+    const W = view.clientWidth, H = view.clientHeight, pad = W < 500 ? 16 : 40;
+    V.z = clamp(Math.min((W - pad * 2) / doc.w, (H - pad * 2) / doc.h), 0.05, 4);
+    anchorAt({ x: doc.w / 2, y: doc.h / 2 }, wsCenter()); repositionText(); requestRender();
+  }
+  $("zoom-in").onclick = () => zoomAt(wsCenter(), V.z * 1.25);
+  $("zoom-out").onclick = () => zoomAt(wsCenter(), V.z / 1.25);
+  $("zoom-val").onclick = () => zoomAt(wsCenter(), 1);
+  $("fit").onclick = fit;
+  $("flip").onclick = () => {
+    const c = wsCenter(), d = toDoc(c); V.flip = !V.flip; anchorAt(d, c);
+    $("flip").setAttribute("aria-pressed", V.flip); requestRender();
+  };
+  $("sym").onclick = () => { S.sym = !S.sym; $("sym").setAttribute("aria-pressed", S.sym); requestRender(); toast(S.sym ? "가운데 선을 기준으로 좌우 대칭으로 그려요." : "대칭 그리기를 껐어요."); };
+
+  function resizeView() {
+    dpr = window.devicePixelRatio || 1;
+    view.width = Math.max(1, Math.round(work.clientWidth * dpr)); view.height = Math.max(1, Math.round(work.clientHeight * dpr));
+    requestRender();
+  }
+  new ResizeObserver(resizeView).observe(work);
+
+  /* ---------------- history ---------------- */
+  function commit(entry) {
+    entry.redo(); undoStack.push(entry); redoStack = [];
+    if (undoStack.length > MAX_HISTORY) undoStack.shift();
+    afterChange();
+  }
+  function undo() { if (live) return; const e = undoStack.pop(); if (!e) return; e.undo(); redoStack.push(e); afterChange(); }
+  function redo() { if (live) return; const e = redoStack.pop(); if (!e) return; e.redo(); undoStack.push(e); afterChange(); }
+  function afterChange() {
+    if (!activeLayer()) active = layers[layers.length - 1].id;
+    $("undo").disabled = !undoStack.length; $("redo").disabled = !redoStack.length;
+    requestRender(true); renderLayers(); scheduleSave();
+  }
+  function addOp(l, op) {
+    commit({
+      redo() { l.ops.push(op); renderOp(l.cx, op); if (op.shade) ensureBase(l); else if (l.base) renderOp(l.baseCx, op); },
+      undo() { l.ops.pop(); rebuild(l); },
+    });
+    if (op.color && !op.eraser) pushRecent(op.color);
+  }
+  $("undo").onclick = undo; $("redo").onclick = redo;
+
+  /* ---------------- tool options ---------------- */
+  const curSize = () => S.tool === "eraser" ? S.eraserSize : S.tool === "shape" ? S.shapeSize : S.tool === "text" ? S.textSize : S.brushSize[S.brush];
+  function setCurSize(v) {
+    v = clamp(Math.round(v), 1, 400);
+    if (S.tool === "eraser") S.eraserSize = v; else if (S.tool === "shape") S.shapeSize = v; else if (S.tool === "brush") S.brushSize[S.brush] = v;
+    else if (S.tool === "text") { S.textSize = v; styleTextInput(); }
+    const inp = $("o-size"); if (inp) { inp.value = v; $("o-size-out").textContent = v + "px"; }
+    requestRender();
+  }
+  function slider(id, label, min, max, val, fmt, on) {
+    return { html: `<label class="sl">${label}<input type="range" id="${id}" min="${min}" max="${max}" value="${val}"><output id="${id}-out">${fmt(val)}</output></label>`,
+             bind() { const i = $(id); i.addEventListener("input", () => { on(+i.value); $(id + "-out").textContent = fmt(+i.value); }); } };
+  }
+  function seg(id, items, cur, on) {
+    return { html: `<div class="seg" id="${id}">` + items.map(([k, n, ic]) => `<button data-k="${k}" aria-pressed="${k === cur}" title="${n}" aria-label="${n}">${ic ? svg(ic) : n}</button>`).join("") + "</div>",
+             bind() { $(id).querySelectorAll("button").forEach(b => b.onclick = () => { on(b.dataset.k); renderOptions(); }); } };
+  }
+  // brush picker: a drawn icon plus a sample stroke made by the real brush engine
+  const CHEVRON = '<path d="M6 9l6 6 6-6"/>';
+  function brushPicker() {
+    const [k, n, ic] = BRUSHES.find(b => b[0] === S.brush);
+    return {
+      html: `<button class="brush-btn" id="o-brush" aria-haspopup="listbox" aria-expanded="false" title="브러시 종류 고르기">${svg(ic)}<canvas width="104" height="44" data-preview="${k}"></canvas><span>${n}</span>${svg(CHEVRON)}</button>`,
+      bind() { $("o-brush").onclick = e => { e.stopPropagation(); toggleBrushMenu(); }; drawBrushPreviews(); },
+    };
+  }
+  const brushMenu = $("brush-menu");
+  function closeBrushMenu() { brushMenu.hidden = true; const b = $("o-brush"); if (b) b.setAttribute("aria-expanded", "false"); }
+  function toggleBrushMenu() {
+    if (!brushMenu.hidden) return closeBrushMenu();
+    brushMenu.innerHTML = BRUSHES.map(([k, n, ic]) =>
+      `<button role="option" data-k="${k}" aria-selected="${k === S.brush}">${svg(ic)}<canvas width="104" height="44" data-preview="${k}"></canvas><span>${n}</span></button>`).join("");
+    brushMenu.querySelectorAll("button").forEach(b => b.onclick = () => { S.brush = b.dataset.k; closeBrushMenu(); renderOptions(); });
+    const r = $("o-brush").getBoundingClientRect();
+    brushMenu.style.left = Math.max(8, Math.min(r.left, innerWidth - 228)) + "px"; brushMenu.style.top = r.bottom + 6 + "px";
+    brushMenu.hidden = false; $("o-brush").setAttribute("aria-expanded", "true");
+    drawBrushPreviews();
+    brushMenu.querySelector('[aria-selected="true"]').focus();
+  }
+  document.addEventListener("pointerdown", e => {
+    if (brushMenu.hidden || brushMenu.contains(e.target) || e.target.closest("#o-brush")) return;
+    closeBrushMenu();
+    if (e.target === view) e.stopPropagation(); // a tap that closes the menu does not paint
+  }, true);
+  $("opts").addEventListener("scroll", closeBrushMenu);
+  function drawBrushPreviews() {
+    document.querySelectorAll("canvas[data-preview]").forEach(cv => {
+      const k = cv.dataset.preview, c = cv.getContext("2d"), [b, bx] = mk();
+      b.width = cv.width; b.height = cv.height;
+      const pts = [];
+      for (let i = 0; i <= 40; i++) { const t = i / 40; pts.push([10 + t * 84, 22 + Math.sin(t * Math.PI * 2) * 9, 0.35 + 0.65 * Math.sin(t * Math.PI)]); }
+      if (k === "shade") {
+        // three colour bands with a shaded stroke across them
+        const W = cv.width, H = cv.height, bands = ["#e2475b", "#ffc531", "#45b7e8"];
+        bands.forEach((col, i) => { c.fillStyle = col; c.fillRect(Math.floor(i * W / 3), 0, Math.ceil(W / 3), H); });
+        const op = { brush: S.shadeSoft ? "air" : "pen", color: "#000000", size: 18, pressure: false, seed: 7, mirror: 0, points: pts };
+        drawStroke(bx, op, strokeState(op));
+        const m = bx.getImageData(0, 0, W, H).data, base = c.getImageData(0, 0, W, H), d = base.data;
+        for (let p = 0; p < d.length; p += 4) {
+          const a = m[p + 3] / 255; if (!a) continue;
+          const [r, g, bb] = shadeColor(d[p], d[p + 1], d[p + 2]);
+          d[p] += (r - d[p]) * a; d[p + 1] += (g - d[p + 1]) * a; d[p + 2] += (bb - d[p + 2]) * a;
+        }
+        c.putImageData(base, 0, 0);
+        return;
+      }
+      const op = { brush: k, color: S.color, size: BRUSH_PREVIEW[k] * 2, pressure: k === "ink", seed: 7, mirror: 0, points: pts };
+      drawStroke(bx, op, strokeState(op));
+      c.clearRect(0, 0, cv.width, cv.height);
+      c.globalAlpha = S.brushOpacity[k] / 100; c.drawImage(b, 0, 0); c.globalAlpha = 1;
+    });
+  }
+  const hint = t => ({ html: `<span class="hint">${t}</span>`, bind() {} });
+  const px = v => v + "px", pct = v => v + "%";
+  function renderOptions() {
+    const parts = [], t = S.tool;
+    if (t === "brush") {
+      const b = S.brush;
+      parts.push(brushPicker());
+      if (b === "shade") {
+        parts.push(seg("o-smode", [["shadow", "그림자"], ["light", "빛"]], S.shadeMode, k => S.shadeMode = k));
+        parts.push(slider("o-sstr", "강도", 5, 100, S.shadeStrength, pct, v => { S.shadeStrength = v; drawBrushPreviews(); }));
+        parts.push(slider("o-shue", "색감 변화", 0, 100, S.shadeHue, pct, v => { S.shadeHue = v; drawBrushPreviews(); }));
+        parts.push(seg("o-ssoft", [["soft", "부드럽게"], ["hard", "선명하게"]], S.shadeSoft ? "soft" : "hard", k => S.shadeSoft = k === "soft"));
+      }
+      parts.push(slider("o-size", "크기", 1, 300, S.brushSize[b], px, v => { S.brushSize[S.brush] = v; requestRender(); }));
+      parts.push(slider("o-op", "불투명도", 1, 100, S.brushOpacity[b], pct, v => { S.brushOpacity[S.brush] = v; drawBrushPreviews(); }));
+      parts.push(slider("o-sm", "손떨림 보정", 0, 100, S.smooth, pct, v => S.smooth = v));
+    } else if (t === "eraser") {
+      parts.push(seg("o-soft", [["hard", "딱딱한 지우개"], ["soft", "부드러운 지우개"]], S.softEraser ? "soft" : "hard", k => S.softEraser = k === "soft"));
+      parts.push(slider("o-size", "크기", 1, 400, S.eraserSize, px, v => { S.eraserSize = v; requestRender(); }));
+      parts.push(slider("o-op", "세기", 1, 100, S.eraserOpacity, pct, v => S.eraserOpacity = v));
+    } else if (t === "fill") {
+      parts.push(seg("o-ref", [["all", "보이는 모든 레이어 기준"], ["one", "현재 레이어 기준"]], S.fillAll ? "all" : "one", k => S.fillAll = k === "all"));
+      parts.push(slider("o-tol", "허용 범위", 0, 160, S.tol, v => v, v => S.tol = v));
+      parts.push(slider("o-op", "불투명도", 1, 100, S.fillOpacity, pct, v => S.fillOpacity = v));
+    } else if (t === "shape") {
+      parts.push(seg("o-shape", SHAPES, S.shape, k => S.shape = k));
+      parts.push(seg("o-sfill", [["line", "선만"], ["fill", "면 채우기"]], S.shapeFill ? "fill" : "line", k => S.shapeFill = k === "fill"));
+      parts.push(slider("o-size", "선 두께", 1, 100, S.shapeSize, px, v => S.shapeSize = v));
+      parts.push(slider("o-op", "불투명도", 1, 100, S.shapeOpacity, pct, v => S.shapeOpacity = v));
+      parts.push(hint("Shift: 정사각형·정원·45° 직선"));
+    } else if (t === "text") {
+      parts.push({ html: `<label class="sl">글꼴<select id="o-font">${FONTS.map(([f, n]) => `<option value="${f}"${f === S.font ? " selected" : ""}>${n}</option>`).join("")}</select></label>`,
+                   bind() { $("o-font").onchange = e => { S.font = e.target.value; styleTextInput(); }; } });
+      parts.push(slider("o-size", "크기", 8, 400, S.textSize, px, v => { S.textSize = v; styleTextInput(); }));
+      parts.push(slider("o-op", "불투명도", 1, 100, S.textOpacity, pct, v => S.textOpacity = v));
+      parts.push(hint("캔버스를 누르고 입력한 뒤 Enter로 넣어요. 줄바꿈은 Shift+Enter."));
+    } else if (t === "sticker") {
+      parts.push({ html: '<div class="seg" id="o-stk">' + STICKERS.map(s => `<button class="sticker" data-s="${s}" aria-pressed="${s === S.sticker}" aria-label="스티커 ${s}">${s}</button>`).join("") + "</div>",
+                   bind() { $("o-stk").querySelectorAll("button").forEach(b => b.onclick = () => { S.sticker = b.dataset.s; renderOptions(); }); } });
+      parts.push(hint("누르면 붙고, 누른 채 끌면 크기가 바뀌어요."));
+    } else if (t === "picker") {
+      parts.push(hint("캔버스를 누르면 그 자리의 색을 가져와요. 브러시를 쓰다가 Alt를 누른 채 클릭해도 돼요."));
+    } else if (t === "move") {
+      parts.push(hint("드래그하면 선택한 레이어 전체가 움직여요."));
+    } else if (t === "hand") {
+      parts.push(hint("드래그해서 화면을 옮겨요. 휠로 확대·축소, 스페이스를 누른 채 드래그해도 옮겨져요. 터치는 두 손가락."));
+    }
+    $("opts").innerHTML = parts.map(p => p.html).join("");
+    parts.forEach(p => p.bind());
+  }
+
+  // tool rail
+  const rail = $("rail"), chips = rail.querySelector(".chips");
+  TOOLS.forEach(([k, name, key, ic]) => {
+    const b = document.createElement("button");
+    b.className = "tool"; b.dataset.tool = k; b.title = `${name} (${key})`; b.setAttribute("aria-label", name);
+    b.innerHTML = svg(ic); b.onclick = () => setTool(k);
+    rail.insertBefore(b, chips);
+  });
+  function setTool(t) {
+    if (t !== "text") commitText();
+    closeBrushMenu();
+    S.tool = t;
+    rail.querySelectorAll(".tool").forEach(b => b.setAttribute("aria-pressed", b.dataset.tool === t));
+    updateCursor(); renderOptions(); requestRender();
+  }
+  function updateCursor() {
+    const t = S.tool;
+    view.style.cursor = spaceDown || t === "hand" ? (gesture && gesture.type === "pan" ? "grabbing" : "grab")
+      : t === "move" ? "move" : t === "text" ? "text" : t === "brush" || t === "eraser" ? "none" : "crosshair";
+  }
+
+  /* ---------------- color panel ---------------- */
+  let hsv = rgbToHsv(...hexToRgb(S.color));
+  const svCv = $("sv-cv"), svx = svCv.getContext("2d"), hueCv = $("hue-cv"), hx = hueCv.getContext("2d");
+  (() => { const g = hx.createLinearGradient(0, 0, hueCv.width, 0); for (let i = 0; i <= 6; i++) g.addColorStop(i / 6, `hsl(${i * 60},100%,50%)`); hx.fillStyle = g; hx.fillRect(0, 0, hueCv.width, hueCv.height); })();
+  function drawSV() {
+    const w = svCv.width, h = svCv.height;
+    svx.fillStyle = `hsl(${hsv.h},100%,50%)`; svx.fillRect(0, 0, w, h);
+    let g = svx.createLinearGradient(0, 0, w, 0); g.addColorStop(0, "#fff"); g.addColorStop(1, "rgba(255,255,255,0)"); svx.fillStyle = g; svx.fillRect(0, 0, w, h);
+    g = svx.createLinearGradient(0, 0, 0, h); g.addColorStop(0, "rgba(0,0,0,0)"); g.addColorStop(1, "#000"); svx.fillStyle = g; svx.fillRect(0, 0, w, h);
+  }
+  function setColor(hex, fromHsv) {
+    S.color = hex.toLowerCase();
+    if (!fromHsv) { const n = rgbToHsv(...hexToRgb(hex)); hsv = (n.s > 0 && n.v > 0) ? n : { h: hsv.h, s: n.s, v: n.v }; }
+    drawSV();
+    $("sv-knob").style.left = hsv.s * 100 + "%"; $("sv-knob").style.top = (1 - hsv.v) * 100 + "%";
+    $("hue-knob").style.left = hsv.h / 360 * 100 + "%";
+    $("cur").style.background = S.color; $("chip1").style.background = S.color; $("chip2").style.background = S.color2;
+    if (document.activeElement !== $("hex")) $("hex").value = S.color.toUpperCase();
+    styleTextInput(); drawBrushPreviews();
+  }
+  function swapColors() { const a = S.color, b = S.color2; S.color2 = a; setColor(b); }
+  function dragOn(el, fn) {
+    el.addEventListener("pointerdown", e => {
+      el.setPointerCapture(e.pointerId);
+      const go = ev => { const r = el.getBoundingClientRect(); fn(clamp((ev.clientX - r.left) / r.width, 0, 1), clamp((ev.clientY - r.top) / r.height, 0, 1)); };
+      go(e);
+      const mv = ev => go(ev), up = () => { el.removeEventListener("pointermove", mv); el.removeEventListener("pointerup", up); };
+      el.addEventListener("pointermove", mv); el.addEventListener("pointerup", up);
+    });
+  }
+  dragOn($("sv"), (x, y) => { hsv.s = x; hsv.v = 1 - y; setColor(rgbToHex(...hsvToRgb(hsv.h, hsv.s, hsv.v)), true); });
+  dragOn($("hue"), x => { hsv.h = x * 359.9; setColor(rgbToHex(...hsvToRgb(hsv.h, hsv.s, hsv.v)), true); });
+  $("hex").addEventListener("change", e => {
+    let v = e.target.value.trim(); if (!v.startsWith("#")) v = "#" + v;
+    if (/^#[0-9a-f]{3}$/i.test(v)) v = "#" + v.slice(1).split("").map(c => c + c).join("");
+    if (/^#[0-9a-f]{6}$/i.test(v)) setColor(v); else { e.target.value = S.color.toUpperCase(); toast("색상 코드는 #FF8800 같은 형식으로 넣어 주세요."); }
+  });
+  function swatchButtons(el, list) {
+    el.innerHTML = "";
+    list.forEach(c => { const b = document.createElement("button"); b.style.background = c; b.title = c.toUpperCase(); b.setAttribute("aria-label", "색상 " + c); b.onclick = () => setColor(c); el.appendChild(b); });
+  }
+  swatchButtons($("palette"), PALETTE);
+  function pushRecent(c) { S.recent = [c, ...S.recent.filter(x => x !== c)].slice(0, 9); swatchButtons($("recent"), S.recent); }
+  $("chip2").onclick = swapColors;
+  $("chip1").onclick = () => $("panel").classList.add("open");
+
+  /* ---------------- layers panel ---------------- */
+  $("blend").innerHTML = BLENDS.map(([k, n]) => `<option value="${k}">${n}</option>`).join("");
+  const EYE_ON = '<path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>';
+  const EYE_OFF = '<path d="M3 3l18 18M10.6 5.1A10 10 0 0112 5c6 0 10 7 10 7a17 17 0 01-3.2 3.9M6.6 6.6C3.8 8.4 2 12 2 12s4 7 10 7c1.8 0 3.4-.6 4.7-1.4"/>';
+  function renderLayers() {
+    scheduleSave();
+    const list = $("layer-list"); list.innerHTML = "";
+    [...layers].reverse().forEach(l => {
+      const li = document.createElement("li");
+      li.className = "layer"; li.setAttribute("role", "option"); li.setAttribute("aria-selected", l.id === active);
+      const eye = document.createElement("button");
+      eye.className = "eye"; eye.setAttribute("aria-pressed", l.visible); eye.setAttribute("aria-label", l.name + (l.visible ? " 숨기기" : " 보이기"));
+      eye.innerHTML = svg(l.visible ? EYE_ON : EYE_OFF);
+      eye.onclick = ev => { ev.stopPropagation(); l.visible = !l.visible; requestRender(true); renderLayers(); };
+      const th = document.createElement("canvas"); th.width = 104; th.height = 76;
+      const tc = th.getContext("2d"), r = Math.min(104 / doc.w, 76 / doc.h);
+      tc.drawImage(l.cv, (104 - doc.w * r) / 2, (76 - doc.h * r) / 2, doc.w * r, doc.h * r);
+      const meta = document.createElement("div"); meta.className = "meta";
+      const nm = document.createElement("span"); nm.className = "name"; nm.textContent = l.name; nm.title = "두 번 눌러 이름 바꾸기";
+      const sub = document.createElement("span"); sub.className = "sub";
+      sub.textContent = `${BLENDS.find(b => b[0] === l.blend)[1]} · ${Math.round(l.opacity * 100)}%`;
+      meta.append(nm, sub);
+      nm.ondblclick = ev => {
+        ev.stopPropagation();
+        const inp = document.createElement("input"); inp.type = "text"; inp.value = l.name; inp.setAttribute("aria-label", "레이어 이름");
+        nm.replaceWith(inp); inp.focus(); inp.select();
+        let done = false;
+        const finish = ok => { if (done) return; done = true; if (ok && inp.value.trim()) l.name = inp.value.trim().slice(0, 30); renderLayers(); };
+        inp.onkeydown = e2 => { if (e2.key === "Enter") finish(true); if (e2.key === "Escape") finish(false); };
+        inp.onblur = () => finish(true);
+        inp.onclick = e2 => e2.stopPropagation();
+      };
+      li.append(eye, th, meta);
+      li.onclick = () => { if (active !== l.id) { active = l.id; renderLayers(); } };
+      list.appendChild(li);
+    });
+    const a = activeLayer(), idx = layers.indexOf(a);
+    $("blend").value = a.blend;
+    $("layer-opacity").value = Math.round(a.opacity * 100); $("layer-opacity-out").textContent = Math.round(a.opacity * 100) + "%";
+    $("l-up").disabled = idx === layers.length - 1; $("l-down").disabled = idx === 0;
+    $("l-merge").disabled = idx === 0; $("l-del").disabled = layers.length <= 1;
+    $("l-add").disabled = $("l-dup").disabled = layers.length >= MAX_LAYERS;
+    $("layer-count").textContent = `${layers.length} / ${MAX_LAYERS}`;
+  }
+  $("blend").onchange = e => { activeLayer().blend = e.target.value; requestRender(true); renderLayers(); };
+  $("layer-opacity").addEventListener("input", e => {
+    activeLayer().opacity = e.target.value / 100; $("layer-opacity-out").textContent = e.target.value + "%"; requestRender(true);
+  });
+  $("layer-opacity").addEventListener("change", () => renderLayers());
+  function insertLayerEntry(l, at, prevActive) {
+    return { redo() { layers.splice(at, 0, l); active = l.id; }, undo() { layers.splice(layers.indexOf(l), 1); active = prevActive; } };
+  }
+  $("l-add").onclick = () => {
+    if (layers.length >= MAX_LAYERS) return;
+    commit(insertLayerEntry(makeLayer(), layers.indexOf(activeLayer()) + 1, active));
+  };
+  $("l-dup").onclick = () => {
+    if (layers.length >= MAX_LAYERS) return;
+    const s = activeLayer(), l = makeLayer(s.name + " 복사");
+    l.ops = s.ops.slice(); l.opacity = s.opacity; l.blend = s.blend; l.visible = s.visible; rebuild(l);
+    if (l.ops.some(op => op.shade)) ensureBase(l);
+    commit(insertLayerEntry(l, layers.indexOf(s) + 1, active));
+  };
+  $("l-merge").onclick = () => {
+    const up = activeLayer(), i = layers.indexOf(up); if (i <= 0) return;
+    const down = layers[i - 1];
+    const [snap, sx] = mk(); snap.width = doc.w; snap.height = doc.h; sx.drawImage(up.cv, 0, 0);
+    const op = { kind: "image", img: snap, opacity: up.visible ? up.opacity : 0, blend: up.blend };
+    commit({
+      redo() { layers.splice(layers.indexOf(up), 1); down.ops.push(op); renderOp(down.cx, op); active = down.id; },
+      undo() { down.ops.pop(); rebuild(down); layers.splice(layers.indexOf(down) + 1, 0, up); active = up.id; },
+    });
+  };
+  $("l-clear").onclick = () => {
+    const l = activeLayer(), ops = l.ops; if (!ops.length) return;
+    commit({ redo() { l.ops = []; rebuild(l); }, undo() { l.ops = ops; rebuild(l); } });
+    toast(`${l.name}을(를) 비웠어요. 되돌리기로 살릴 수 있어요.`);
+  };
+  function moveLayer(d) {
+    const l = activeLayer(), i = layers.indexOf(l); if (i + d < 0 || i + d >= layers.length) return;
+    const sw = dir => () => { const a = layers.indexOf(l), b = a + dir; [layers[a], layers[b]] = [layers[b], layers[a]]; active = l.id; };
+    commit({ redo: sw(d), undo: sw(-d) });
+  }
+  $("l-up").onclick = () => moveLayer(1);
+  $("l-down").onclick = () => moveLayer(-1);
+  $("l-del").onclick = () => {
+    if (layers.length <= 1) return;
+    const l = activeLayer(), at = layers.indexOf(l);
+    commit({ redo() { layers.splice(layers.indexOf(l), 1); active = layers[Math.max(0, at - 1)].id; }, undo() { layers.splice(at, 0, l); active = l.id; } });
+    toast(`${l.name}을(를) 지웠어요. 되돌리기로 살릴 수 있어요.`);
+  };
+  function updateBgRow() {
+    scheduleSave();
+    $("bg-eye").setAttribute("aria-pressed", doc.bgVisible);
+    $("bg-eye").innerHTML = svg(doc.bgVisible ? EYE_ON : EYE_OFF);
+    $("bg-color").value = doc.bg;
+    $("bg-sub").textContent = doc.bgVisible ? doc.bg.toUpperCase() : "숨김 (투명하게 저장)";
+  }
+  $("bg-eye").onclick = () => { doc.bgVisible = !doc.bgVisible; updateBgRow(); requestRender(true); };
+  $("bg-color").addEventListener("input", e => { doc.bg = e.target.value; doc.bgVisible = true; updateBgRow(); requestRender(true); });
+  $("panel-toggle").onclick = () => $("panel").classList.toggle("open");
+  $("panel-close").onclick = () => $("panel").classList.remove("open");
+
+  /* ---------------- fill ---------------- */
+  function floodFill(x, y, layer) {
+    x = Math.floor(x); y = Math.floor(y);
+    if (x < 0 || y < 0 || x >= doc.w || y >= doc.h) return null;
+    tctx.clearRect(0, 0, doc.w, doc.h);
+    if (S.fillAll) { for (const l of layers) if (l.visible) { tctx.globalAlpha = l.opacity; tctx.drawImage(l.cv, 0, 0); } tctx.globalAlpha = 1; }
+    else tctx.drawImage(layer.cv, 0, 0);
+    const data = tctx.getImageData(0, 0, doc.w, doc.h).data, W = doc.w, H = doc.h;
+    // flatten onto white so empty paper and white paint count as the same colour
+    const flat = new Float32Array(W * H * 3);
+    for (let i = 0, j = 0; i < data.length; i += 4, j += 3) {
+      const a = data[i + 3] / 255;
+      flat[j] = data[i] * a + 255 * (1 - a); flat[j + 1] = data[i + 1] * a + 255 * (1 - a); flat[j + 2] = data[i + 2] * a + 255 * (1 - a);
+    }
+    const s0 = (y * W + x) * 3, R = flat[s0], G = flat[s0 + 1], B = flat[s0 + 2], TOL = S.tol * 1.5 + 1;
+    const match = i => { const j = i * 3; return Math.abs(flat[j] - R) + Math.abs(flat[j + 1] - G) + Math.abs(flat[j + 2] - B) <= TOL; };
+    const mask = new Uint8Array(W * H), stack = [x, y];
+    let minX = x, maxX = x, minY = y, maxY = y;
+    while (stack.length) {
+      const sy = stack.pop(), sx = stack.pop(), row = sy * W;
+      if (mask[row + sx] || !match(row + sx)) continue;
+      let lx = sx; while (lx > 0 && !mask[row + lx - 1] && match(row + lx - 1)) lx--;
+      let rx = sx; while (rx < W - 1 && !mask[row + rx + 1] && match(row + rx + 1)) rx++;
+      for (let i = lx; i <= rx; i++) mask[row + i] = 1;
+      if (lx < minX) minX = lx; if (rx > maxX) maxX = rx; if (sy < minY) minY = sy; if (sy > maxY) maxY = sy;
+      for (const ny of [sy - 1, sy + 1]) {
+        if (ny < 0 || ny >= H) continue;
+        const nr = ny * W; let i = lx;
+        while (i <= rx) {
+          while (i <= rx && (mask[nr + i] || !match(nr + i))) i++;
+          if (i > rx) break;
+          stack.push(i, ny);
+          while (i <= rx && !mask[nr + i] && match(nr + i)) i++;
+        }
+      }
+    }
+    minX = Math.max(0, minX - 1); minY = Math.max(0, minY - 1); maxX = Math.min(W - 1, maxX + 1); maxY = Math.min(H - 1, maxY + 1);
+    const bw = maxX - minX + 1, bh = maxY - minY + 1;
+    const [out, oc] = mk(); out.width = bw; out.height = bh;
+    const img = oc.createImageData(bw, bh), [cr, cg, cb] = hexToRgb(S.color);
+    for (let yy = 0; yy < bh; yy++) for (let xx = 0; xx < bw; xx++) {
+      const gx = xx + minX, gy = yy + minY, k = gy * W + gx;
+      const on = mask[k] || (gx > 0 && mask[k - 1]) || (gx < W - 1 && mask[k + 1]) || (gy > 0 && mask[k - W]) || (gy < H - 1 && mask[k + W]);
+      if (on) { const p = (yy * bw + xx) * 4; img.data[p] = cr; img.data[p + 1] = cg; img.data[p + 2] = cb; img.data[p + 3] = 255; }
+    }
+    oc.putImageData(img, 0, 0);
+    return { kind: "fill", img: out, x: minX, y: minY, color: S.color, opacity: S.fillOpacity / 100 };
+  }
+
+  function pickColor(d) {
+    const x = Math.floor(d.x), y = Math.floor(d.y);
+    if (x < 0 || y < 0 || x >= doc.w || y >= doc.h) return;
+    const p = dctx.getImageData(x, y, 1, 1).data;
+    if (p[3] === 0) return;
+    const a = p[3] / 255;
+    setColor(rgbToHex(p[0] * a + 255 * (1 - a), p[1] * a + 255 * (1 - a), p[2] * a + 255 * (1 - a)));
+  }
+
+  /* ---------------- text tool ---------------- */
+  const ti = $("text-input"); let textAt = null;
+  function styleTextInput() {
+    if (ti.hidden) return;
+    ti.style.font = `${S.textSize * V.z}px "${S.font}", sans-serif`;
+    ti.style.color = S.color; autoSizeText();
+  }
+  function autoSizeText() {
+    ti.style.width = "0px"; ti.style.height = "0px";
+    ti.style.width = Math.max(40, ti.scrollWidth + 8) + "px"; ti.style.height = ti.scrollHeight + "px";
+  }
+  function repositionText() {
+    if (!textAt) return;
+    const q = M().transformPoint(new DOMPoint(textAt.d.x, textAt.d.y));
+    ti.style.left = q.x + "px"; ti.style.top = q.y + "px"; styleTextInput();
+  }
+  function openText(d) {
+    commitText();
+    const l = activeLayer();
+    if (!l.visible) return toast("숨긴 레이어예요. 눈 아이콘을 눌러 보이게 한 뒤 써 주세요.");
+    textAt = { d, layer: l };
+    ti.value = ""; ti.hidden = false;
+    repositionText();
+    ti.focus();
+    requestAnimationFrame(() => { if (textAt) ti.focus(); });
+  }
+  async function commitText() {
+    if (!textAt) return;
+    const txt = ti.value.replace(/\s+$/, ""), at = textAt;
+    textAt = null; ti.hidden = true;
+    if (!txt) return;
+    try { await document.fonts.load(`${S.textSize}px "${S.font}"`, txt); } catch (e) {}
+    addOp(at.layer, { kind: "text", text: txt, x: at.d.x, y: at.d.y, size: S.textSize, font: S.font, color: S.color, opacity: S.textOpacity / 100 });
+  }
+  ti.addEventListener("input", autoSizeText);
+  ti.addEventListener("keydown", e => {
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); commitText(); }
+    if (e.key === "Escape") { textAt = null; ti.hidden = true; }
+  });
+  ti.addEventListener("blur", () => setTimeout(commitText, 0));
+
+  /* ---------------- pointer input ---------------- */
+  const pointers = new Map();
+  function cancelLive() { live = null; gesture = null; requestRender(true); }
+  function needVisible(l) { if (!l.visible) { toast("숨긴 레이어예요. 눈 아이콘을 눌러 보이게 한 뒤 그려 주세요."); return false; } return true; }
+
+  // Pen mode: only a stylus (or mouse) draws. One finger pans, two fingers pinch-zoom, and any finger or palm
+  // that lands while the pen is working is ignored.
+  const ignored = new Set();
+  const capture = e => { try { view.setPointerCapture(e.pointerId); } catch (err) {} };
+  const FINGER_ICON = '<path d="M9 11V5a1.5 1.5 0 013 0v6"/><path d="M12 10V8.5a1.5 1.5 0 013 0V11"/><path d="M15 10.5a1.5 1.5 0 013 0V15c0 3.5-2.5 6-6 6-2.6 0-4.2-1.3-5.6-3.6L4.2 14.6a1.5 1.5 0 012.5-1.6L9 15.5"/>';
+  const STYLUS_ICON = '<path d="M17 3l4 4L8 20l-5 1 1-5z"/><path d="M14.5 5.5l4 4"/>';
+  let inputChosen = false;
+  try { const m = localStorage.getItem("sketchbook-input"); if (m) { S.penOnly = m === "pen"; inputChosen = true; } } catch (e) {}
+  function setPenOnly(on, auto, quiet) {
+    S.penOnly = on;
+    const b = $("input-mode");
+    b.setAttribute("aria-pressed", on);
+    b.innerHTML = svg(on ? STYLUS_ICON : FINGER_ICON) + `<span class="label">${on ? "펜 모드" : "손가락 모드"}</span>`;
+    b.title = on ? "펜 모드: 펜으로만 그리고 손가락은 화면 이동·확대 (눌러서 손가락 모드로)" : "손가락 모드: 손가락으로도 그려요 (눌러서 펜 모드로)";
+    if (!auto) { inputChosen = true; try { localStorage.setItem("sketchbook-input", on ? "pen" : "finger"); } catch (e) {} }
+    if (!quiet) toast(on ? (auto ? "펜이 감지돼서 펜 모드로 바꿨어요. 손가락은 화면 이동·확대만 돼요." : "펜 모드: 펜으로만 그리고, 손가락은 화면 이동·확대만 돼요.")
+             : "손가락 모드: 손가락으로도 그릴 수 있어요.");
+  }
+  $("input-mode").onclick = () => setPenOnly(!S.penOnly);
+  setPenOnly(!!S.penOnly, true, true);
+
+  view.addEventListener("pointerdown", e => {
+    if (e.pointerType === "pen" && !S.penOnly && !inputChosen) setPenOnly(true, true);
+    if (S.penOnly && e.pointerType === "touch") {
+      if (gesture && !gesture.touch) { ignored.add(e.pointerId); return; } // palm or finger while the pen is drawing
+      capture(e);
+      const sp = screenPt(e); pointers.set(e.pointerId, sp);
+      if (pointers.size === 2) {
+        const [a, b] = [...pointers.values()], c = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+        gesture = { type: "pinch", touch: true, d0: Math.hypot(a.x - b.x, a.y - b.y) || 1, z0: V.z, anchor: toDoc(c) };
+      } else if (pointers.size === 1) gesture = { type: "pan", touch: true, sx: sp.x, sy: sp.y, ox: V.ox, oy: V.oy };
+      return;
+    }
+    if (S.penOnly && gesture && gesture.touch) { pointers.forEach((_, id) => ignored.add(id)); pointers.clear(); gesture = null; } // the pen takes over from fingers
+    capture(e);
+    const sp = screenPt(e);
+    pointers.set(e.pointerId, sp);
+    if (pointers.size === 2) {
+      cancelLive();
+      const [a, b] = [...pointers.values()], c = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+      gesture = { type: "pinch", d0: Math.hypot(a.x - b.x, a.y - b.y) || 1, z0: V.z, anchor: toDoc(c) };
+      return;
+    }
+    if (pointers.size > 2) return;
+    if (S.tool === "hand" || spaceDown || e.button === 1) {
+      gesture = { type: "pan", sx: sp.x, sy: sp.y, ox: V.ox, oy: V.oy }; updateCursor(); return;
+    }
+    if (e.button !== 0 && e.pointerType === "mouse") return;
+    const d = toDoc(sp), l = activeLayer();
+    let tool = S.tool;
+    if (e.altKey && ["brush", "fill", "shape"].includes(tool)) tool = "picker";
+    if (tool === "picker") { pickColor(d); gesture = { type: "picker" }; return; }
+    if (tool === "text") { e.preventDefault(); openText(d); return; }
+    if (!needVisible(l)) return;
+    if (tool === "fill") { const op = floodFill(d.x, d.y, l); if (op) addOp(l, op); return; }
+    if (tool === "brush" || tool === "eraser") {
+      const er = tool === "eraser";
+      const op = {
+        kind: "stroke", brush: er ? (S.softEraser ? "air" : "pen") : S.brush, eraser: er, color: S.color,
+        size: er ? S.eraserSize : S.brushSize[S.brush], opacity: (er ? S.eraserOpacity : S.brushOpacity[S.brush]) / 100,
+        pressure: e.pointerType === "pen", seed: (Math.random() * 2 ** 31) | 0, mirror: S.sym ? doc.w : 0,
+        points: [[d.x, d.y, e.pressure || 0.5]],
+      };
+      lctx.clearRect(0, 0, doc.w, doc.h);
+      if (op.brush === "shade") {
+        // read what is visible right now; the stroke paints shaded versions of those colours
+        const maskOp = Object.assign({}, op, { brush: S.shadeSoft ? "air" : "pen", color: "#000000", eraser: false });
+        mctx.clearRect(0, 0, doc.w, doc.h);
+        live = { kind: "stroke", layer: l, op, st: strokeState(maskOp),
+                 shade: { maskOp, sample: sampleWithoutShading(), cur: (renderDoc(), dctx.getImageData(0, 0, doc.w, doc.h).data), mode: S.shadeMode, k: S.shadeStrength / 100, hs: S.shadeHue / 100, soft: S.shadeSoft, cache: new Map() } };
+        shadeSegment(live);
+      } else {
+        const st = strokeState(op); drawStroke(lctx, op, st);
+        live = { kind: "stroke", layer: l, op, st };
+      }
+      gesture = { type: "stroke", last: d };
+    } else if (tool === "shape") {
+      live = { kind: "op", layer: l, op: { kind: "shape", shape: S.shape, filled: S.shapeFill, color: S.color, size: S.shapeSize, opacity: S.shapeOpacity / 100, x1: d.x, y1: d.y, x2: d.x, y2: d.y } };
+      gesture = { type: "shape" };
+    } else if (tool === "sticker") {
+      live = { kind: "op", layer: l, op: { kind: "sticker", emoji: S.sticker, x: d.x, y: d.y, size: Math.round(Math.min(doc.w, doc.h) * 0.12) } };
+      gesture = { type: "sticker", start: d };
+    } else if (tool === "move") {
+      live = { kind: "move", layer: l, dx: 0, dy: 0 }; gesture = { type: "move", start: d };
+    }
+    requestRender(true);
+  });
+
+  view.addEventListener("pointermove", e => {
+    if (ignored.has(e.pointerId)) return;
+    const sp = screenPt(e);
+    if (pointers.has(e.pointerId)) pointers.set(e.pointerId, sp);
+    hover = e.pointerType === "touch" ? null : toDoc(sp);
+    if (!gesture) { if (S.tool === "brush" || S.tool === "eraser") requestRender(); return; }
+    const g = gesture;
+    if (g.type === "pinch") {
+      if (pointers.size < 2) return;
+      const [a, b] = [...pointers.values()], c = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+      V.z = clamp(g.z0 * Math.hypot(a.x - b.x, a.y - b.y) / g.d0, 0.05, 32); anchorAt(g.anchor, c); requestRender(); return;
+    }
+    if (g.type === "pan") { V.ox = g.ox + sp.x - g.sx; V.oy = g.oy + sp.y - g.sy; repositionText(); requestRender(); return; }
+    const d = toDoc(sp);
+    if (g.type === "picker") { pickColor(d); return; }
+    if (g.type === "stroke") {
+      const op = live.op, evs = e.getCoalescedEvents ? e.getCoalescedEvents() : [];
+      const f = 1 - (S.smooth / 100) * 0.92;
+      for (const ev of (evs.length ? evs : [e])) {
+        const r = toDoc(screenPt(ev)), last = g.last;
+        const nx = last.x + (r.x - last.x) * f, ny = last.y + (r.y - last.y) * f;
+        if (Math.hypot(nx - last.x, ny - last.y) < 0.4) continue;
+        g.last = { x: nx, y: ny };
+        op.points.push([nx, ny, ev.pressure || 0.5]);
+      }
+      g.raw = d; g.rawP = e.pressure || 0.5;
+      if (!live.shade) drawStroke(lctx, op, live.st); // shading is processed once per frame in renderDoc
+    } else if (g.type === "shape") {
+      const op = live.op; let x2 = d.x, y2 = d.y; const dx = x2 - op.x1, dy = y2 - op.y1;
+      if (e.shiftKey) {
+        if (op.shape === "line" || op.shape === "arrow") {
+          const a = Math.round(Math.atan2(dy, dx) / (Math.PI / 4)) * (Math.PI / 4), dd = Math.hypot(dx, dy);
+          x2 = op.x1 + dd * Math.cos(a); y2 = op.y1 + dd * Math.sin(a);
+        } else { const m = Math.max(Math.abs(dx), Math.abs(dy)); x2 = op.x1 + Math.sign(dx || 1) * m; y2 = op.y1 + Math.sign(dy || 1) * m; }
+      }
+      op.x2 = x2; op.y2 = y2;
+    } else if (g.type === "sticker") {
+      const dist = Math.hypot(d.x - g.start.x, d.y - g.start.y);
+      if (dist > 8 / V.z) live.op.size = Math.max(12, dist * 2);
+    } else if (g.type === "move") {
+      live.dx = Math.round(d.x - g.start.x); live.dy = Math.round(d.y - g.start.y);
+    }
+    requestRender(true);
+  });
+
+  function endPointer(e) {
+    if (ignored.delete(e.pointerId)) return;
+    pointers.delete(e.pointerId);
+    const g = gesture;
+    if (!g) return;
+    if (g.type === "pinch") { if (pointers.size === 0) gesture = null; return; }
+    if (pointers.size) return;
+    gesture = null; updateCursor();
+    if (!live) { requestRender(); return; }
+    const L = live; live = null;
+    if (L.kind === "stroke") {
+      if (g.raw && Math.hypot(g.raw.x - g.last.x, g.raw.y - g.last.y) > 0.5) L.op.points.push([g.raw.x, g.raw.y, g.rawP]);
+      if (L.shade) {
+        // bake the shaded pixels into an image so undo/redo replays exactly what was painted
+        shadeSegment(L);
+        const bb = strokeBox(L.op);
+        if (bb.w > 0 && bb.h > 0) {
+          const [img, ix] = mk(); img.width = bb.w; img.height = bb.h;
+          ix.drawImage(lbuf, bb.x, bb.y, bb.w, bb.h, 0, 0, bb.w, bb.h);
+          addOp(L.layer, { kind: "fill", shade: true, img, x: bb.x, y: bb.y, opacity: L.op.opacity });
+        } else requestRender(true);
+      } else addOp(L.layer, L.op);
+    } else if (L.kind === "move") {
+      if (L.dx || L.dy) addOp(L.layer, { kind: "move", dx: L.dx, dy: L.dy }); else requestRender(true);
+    } else if (L.op.kind === "shape") {
+      if (Math.hypot(L.op.x2 - L.op.x1, L.op.y2 - L.op.y1) < 2) requestRender(true); else addOp(L.layer, L.op);
+    } else addOp(L.layer, L.op);
+  }
+  view.addEventListener("pointerup", endPointer);
+  view.addEventListener("pointercancel", e => { if (ignored.delete(e.pointerId)) return; pointers.delete(e.pointerId); if (!pointers.size) cancelLive(); });
+  view.addEventListener("pointerleave", () => { hover = null; requestRender(); });
+  view.addEventListener("wheel", e => {
+    e.preventDefault();
+    const sp = screenPt(e);
+    if (e.shiftKey) { V.ox -= e.deltaY || e.deltaX; repositionText(); requestRender(); return; }
+    zoomAt(sp, V.z * Math.exp(-e.deltaY * (e.ctrlKey ? 0.01 : 0.0015)));
+  }, { passive: false });
+  view.addEventListener("contextmenu", e => e.preventDefault());
+
+  /* ---------------- keyboard ---------------- */
+  window.addEventListener("keydown", e => {
+    const tag = e.target.tagName;
+    if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+    const k = e.key.toLowerCase(), mod = e.ctrlKey || e.metaKey;
+    if (mod && k === "z" && !e.shiftKey) { e.preventDefault(); undo(); return; }
+    if (mod && (k === "y" || (k === "z" && e.shiftKey))) { e.preventDefault(); redo(); return; }
+    if (mod && k === "s") { e.preventDefault(); save(); return; }
+    if (mod && k === "0") { e.preventDefault(); fit(); return; }
+    if (mod && (k === "=" || k === "+")) { e.preventDefault(); zoomAt(wsCenter(), V.z * 1.25); return; }
+    if (mod && k === "-") { e.preventDefault(); zoomAt(wsCenter(), V.z / 1.25); return; }
+    if (mod) return;
+    if (k === " ") { e.preventDefault(); if (!spaceDown) { spaceDown = true; updateCursor(); requestRender(); } return; }
+    const t = TOOLS.find(x => x[2].toLowerCase() === k); if (t) { setTool(t[0]); return; }
+    if (k === "x") swapColors();
+    else if (k === "[") setCurSize(curSize() * 0.85 - 1);
+    else if (k === "]") setCurSize(curSize() * 1.15 + 1);
+    else if (k === "+" || k === "=") zoomAt(wsCenter(), V.z * 1.25);
+    else if (k === "-") zoomAt(wsCenter(), V.z / 1.25);
+    else if (k === "escape") { closeBrushMenu(); $("new-modal").hidden = true; $("preview").hidden = true; $("panel").classList.remove("open"); }
+  });
+  window.addEventListener("keyup", e => { if (e.key === " ") { spaceDown = false; updateCursor(); requestRender(); } });
+
+  /* ---------------- new canvas ---------------- */
+  function screenSize() { const W = Math.max(320, work.clientWidth), H = Math.max(320, work.clientHeight), s = 1600 / Math.max(W, H); return [Math.round(W * s), Math.round(H * s)]; }
+  $("new-btn").onclick = () => {
+    const [sw, sh] = screenSize();
+    const presets = [["화면 비율", sw, sh], ["정사각형", 2048, 2048], ["가로 16:9", 1920, 1080], ["세로 9:16", 1080, 1920], ["A4 세로", 1754, 2480], ["엽서 가로", 1800, 1200]];
+    const p = $("presets"); p.innerHTML = "";
+    presets.forEach(([n, w, h]) => {
+      const b = document.createElement("button"); b.innerHTML = `${n}<small>${w} × ${h}</small>`;
+      b.onclick = () => { $("new-w").value = w; $("new-h").value = h; }; p.appendChild(b);
+    });
+    $("new-w").value = doc.w; $("new-h").value = doc.h; $("new-bg").value = doc.bg; $("new-transparent").checked = !doc.bgVisible;
+    $("new-modal").hidden = false;
+  };
+  $("new-cancel").onclick = () => $("new-modal").hidden = true;
+  $("new-ok").onclick = () => {
+    const w = clamp(+$("new-w").value || 1600, 64, 3000), h = clamp(+$("new-h").value || 1200, 64, 3000);
+    resetDoc(w, h, $("new-bg").value, !$("new-transparent").checked);
+    $("new-modal").hidden = true; toast(`${w} × ${h} 새 캔버스를 만들었어요.`);
+  };
+
+  function resetDoc(w, h, bg, bgVisible) {
+    doc.w = w; doc.h = h; doc.bg = bg; doc.bgVisible = bgVisible;
+    [docCv, tmp, sbuf, lbuf, mvCv, maskCv].forEach(c => { c.width = w; c.height = h; });
+    layerSeq = 0; layers = [makeLayer()]; active = layers[0].id;
+    undoStack = []; redoStack = []; live = null; gesture = null;
+    $("docsize").textContent = `${w} × ${h}`;
+    updateBgRow(); afterChange(); fit();
+  }
+
+  /* ---------------- save ---------------- */
+  let toastTimer;
+  function toast(msg) { const t = $("toast"); t.textContent = msg; t.hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => t.hidden = true, 2600); }
+  let downloads = null;
+  if (window.claude && window.claude.use) window.claude.use("downloads").then(d => { downloads = d; }).catch(() => {});
+  function stamp() { const d = new Date(), z = n => String(n).padStart(2, "0"); return `${d.getFullYear()}${z(d.getMonth() + 1)}${z(d.getDate())}-${z(d.getHours())}${z(d.getMinutes())}`; }
+  const inArtifact = !!(window.claude && window.claude.use);
+  async function save() {
+    await commitText(); renderDoc();
+    const blob = await new Promise(r => docCv.toBlob(r, "image/png"));
+    const name = `그림-${stamp()}.png`;
+    if (downloads) {
+      try { await downloads.save({ filename: name, data: blob }); toast("저장했어요."); return; }
+      catch (err) {
+        if (err && err.code === "declined") return;
+        if (err && err.code === "rate_limited") { toast("저장 창이 이미 열려 있어요."); return; }
+      }
+    }
+    if (!inArtifact) {
+      // installed app / plain web page: phones get the share sheet ("이미지 저장"), computers a normal download
+      const file = new File([blob], name, { type: "image/png" });
+      const mobile = matchMedia("(pointer: coarse)").matches;
+      if (mobile && navigator.canShare && navigator.canShare({ files: [file] })) {
+        try { await navigator.share({ files: [file] }); return; } catch (err) { if (err && err.name === "AbortError") return; }
+      }
+      const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = name;
+      document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+      toast("저장했어요."); return;
+    }
+    $("preview-img").src = URL.createObjectURL(blob); $("preview").hidden = false;
+  }
+  $("save").onclick = save;
+  $("preview-close").onclick = () => { $("preview").hidden = true; URL.revokeObjectURL($("preview-img").src); };
+
+  /* ---------------- start ---------------- */
+  /* ---------------- autosave (this device only) ---------------- */
+  // Keeps the current picture in the browser's own storage so closing the app or refreshing doesn't lose it.
+  // Each layer is stored as a PNG; undo history starts fresh after reopening.
+  const DB = "sketchbook", STORE = "doc";
+  function idb() {
+    return new Promise((res, rej) => {
+      const r = indexedDB.open(DB, 1);
+      r.onupgradeneeded = () => r.result.createObjectStore(STORE);
+      r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
+    });
+  }
+  async function idbDo(mode, fn) {
+    const db = await idb();
+    return new Promise((res, rej) => { const tx = db.transaction(STORE, mode), q = fn(tx.objectStore(STORE)); tx.oncomplete = () => res(q && q.result); tx.onerror = () => rej(tx.error); });
+  }
+  var saveTimer = 0, restoring = true;
+  function scheduleSave() { if (restoring) return; clearTimeout(saveTimer); saveTimer = setTimeout(persist, 1200); }
+  async function persist() {
+    try {
+      const ls = await Promise.all(layers.map(async l => ({
+        name: l.name, visible: l.visible, opacity: l.opacity, blend: l.blend,
+        png: l.ops.length ? await new Promise(r => l.cv.toBlob(r, "image/png")) : null,
+      })));
+      const data = { v: 1, w: doc.w, h: doc.h, bg: doc.bg, bgVisible: doc.bgVisible, active: layers.findIndex(l => l.id === active), layers: ls };
+      await idbDo("readwrite", st => st.put(data, "current"));
+    } catch (e) { /* storage unavailable (private window etc.): keep working without autosave */ }
+  }
+  async function restore() {
+    try {
+      const d = await idbDo("readonly", st => st.get("current"));
+      if (!d || !d.layers || !d.layers.length) return false;
+      resetDoc(d.w, d.h, d.bg, d.bgVisible);
+      const built = [];
+      layerSeq = 0;
+      for (const s of d.layers) {
+        const l = makeLayer(s.name); l.visible = s.visible; l.opacity = s.opacity; l.blend = s.blend;
+        if (s.png) { const img = await createImageBitmap(s.png); l.ops = [{ kind: "image", img, opacity: 1, blend: "source-over" }]; rebuild(l); }
+        built.push(l);
+      }
+      layers = built; active = (layers[d.active] || layers[layers.length - 1]).id;
+      updateBgRow(); afterChange(); fit();
+      return true;
+    } catch (e) { return false; }
+  }
+  document.addEventListener("visibilitychange", () => { if (document.hidden && !restoring) { clearTimeout(saveTimer); persist(); } });
+
+  async function start() {
+    resizeView();
+    const [w, h] = screenSize();
+    resetDoc(w, h, "#ffffff", true);
+    setColor(S.color); setTool("brush");
+    if (await restore()) toast("그리던 그림을 불러왔어요.");
+    restoring = false;
+  }
+  requestAnimationFrame(start);
+})();
+</script>
+
+<script>
+if ("serviceWorker" in navigator) addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {}));
+document.addEventListener("gesturestart", e => e.preventDefault());
+</script>
+</body>
+</html>
