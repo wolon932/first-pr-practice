@@ -572,7 +572,11 @@ input[type="range"] { accent-color: var(--accent); }
   // from the base colours and never stacks on top of old shading.
   // Layers that hold shading keep a second canvas ("base") with everything except the shading, updated as ops are added.
   const [sampCv, sampCtx] = mk(CPU);
-  function rebuildBase(l) { l.baseCx.clearRect(0, 0, doc.w, doc.h); l.ops.forEach(op => { if (!op.shade) renderOp(l.baseCx, op); }); }
+  // the layer without its shading; a reopened layer starts from its saved unshaded picture (baseSeed)
+  function rebuildBase(l) {
+    l.baseCx.clearRect(0, 0, doc.w, doc.h);
+    l.ops.forEach(op => { if (op.shade) return; renderOp(l.baseCx, op.restored && l.baseSeed ? Object.assign({}, op, { img: l.baseSeed }) : op); });
+  }
   function ensureBase(l) {
     if (l.base) return;
     const [c, x] = mk(); c.width = doc.w; c.height = doc.h; l.base = c; l.baseCx = x; rebuildBase(l);
@@ -602,26 +606,36 @@ input[type="range"] { accent-color: var(--accent); }
   // Each shading stroke keeps its own coverage mask (grey = strength); the most any stroke reached is what counts, so a new
   // stroke only tops up where it is stronger and same-mode shading never builds up. Erased areas drop out (clipped to the layer's pixels).
   const [covCv, covCtx] = mk(CPU);
-  function shadeMasks(l, mode) {
+  // all shading masks of a layer in painting order (shadow and light), shifted by any later layer moves
+  function shadeMasks(l) {
     const list = [];
-    if (l.shadeSeed && l.shadeSeed[mode]) list.push({ img: l.shadeSeed[mode], x: 0, y: 0 });
+    for (const mode of ["shadow", "light"]) if (l.shadeSeed && l.shadeSeed[mode]) list.push({ img: l.shadeSeed[mode], x: 0, y: 0, mode, seed: true });
     for (const o of l.ops) {
       if (o.kind === "move") list.forEach(m => { m.x += o.dx; m.y += o.dy; });
-      else if (o.shade && o.mask && o.mode === mode) list.push({ img: o.mask, x: o.x, y: o.y });
+      else if (o.shade && o.mask && o.mode) list.push({ img: o.mask, x: o.x, y: o.y, mode: o.mode });
     }
     return list;
   }
+  // Same-mode strokes keep the strongest coverage; a stroke of the other mode painted later covers it up
+  // (light over shadow, shadow over light), so that spot can be shaded in the first mode again.
   function layerShadeCoverage(l, mode) {
-    const list = shadeMasks(l, mode);
-    if (!list.length) return null;
-    covCv.width = doc.w; covCv.height = doc.h;
-    covCtx.fillStyle = "#000"; covCtx.fillRect(0, 0, doc.w, doc.h);
-    covCtx.globalCompositeOperation = "lighten";
-    for (const m of list) covCtx.drawImage(m.img, m.x, m.y);
-    covCtx.globalCompositeOperation = "source-over";
-    const g = covCtx.getImageData(0, 0, doc.w, doc.h).data, a = l.cx.getImageData(0, 0, doc.w, doc.h).data;
-    const out = new Uint8Array(doc.w * doc.h);
-    for (let i = 0; i < out.length; i++) out[i] = a[i * 4 + 3] ? g[i * 4] : 0;
+    const list = shadeMasks(l);
+    if (!list.some(m => m.mode === mode)) return null;
+    const W = doc.w, H = doc.h, out = new Uint8Array(W * H);
+    for (const m of list) {
+      const x0 = Math.max(0, m.x), y0 = Math.max(0, m.y), x1 = Math.min(W, m.x + m.img.width), y1 = Math.min(H, m.y + m.img.height);
+      if (x1 <= x0 || y1 <= y0) continue;
+      covCv.width = x1 - x0; covCv.height = y1 - y0;
+      covCtx.drawImage(m.img, m.x - x0, m.y - y0);
+      const g = covCtx.getImageData(0, 0, x1 - x0, y1 - y0).data, same = m.mode === mode;
+      for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) {
+        const v = g[((y - y0) * (x1 - x0) + x - x0) * 4], i = y * W + x;
+        if (same) { if (v > out[i]) out[i] = v; }
+        else if (v && out[i] && !m.seed) out[i] = Math.round(out[i] * (255 - v) / 255);
+      }
+    }
+    const a = l.cx.getImageData(0, 0, W, H).data;
+    for (let i = 0; i < out.length; i++) if (!a[i * 4 + 3]) out[i] = 0;
     return out;
   }
   function shadeCoverage(mode) {
@@ -1138,8 +1152,8 @@ input[type="range"] { accent-color: var(--accent); }
   $("l-dup").onclick = () => {
     if (layers.length >= MAX_LAYERS) return;
     const s = activeLayer(), l = makeLayer(s.name + " 복사");
-    l.ops = s.ops.slice(); l.shadeSeed = s.shadeSeed; l.opacity = s.opacity; l.blend = s.blend; l.visible = s.visible; rebuild(l);
-    if (l.ops.some(op => op.shade)) ensureBase(l);
+    l.ops = s.ops.slice(); l.shadeSeed = s.shadeSeed; l.baseSeed = s.baseSeed; l.opacity = s.opacity; l.blend = s.blend; l.visible = s.visible; rebuild(l);
+    if (l.baseSeed || l.ops.some(op => op.shade)) ensureBase(l);
     commit(insertLayerEntry(l, layers.indexOf(s) + 1, active));
   };
   $("l-merge").onclick = () => {
@@ -1643,6 +1657,7 @@ input[type="range"] { accent-color: var(--accent); }
           name: l.name, visible: l.visible, opacity: l.opacity, blend: l.blend,
           png: l.ops.length ? await new Promise(r => l.cv.toBlob(r, "image/png")) : null,
           shadow: l.ops.length ? await covPng(l, "shadow") : null, light: l.ops.length ? await covPng(l, "light") : null,
+          base: l.base && l.ops.length ? await new Promise(r => l.base.toBlob(r, "image/png")) : null, // unshaded picture, so reopened shading starts from the real colours
         })));
         const data = { v: 2, w: doc.w, h: doc.h, bg: doc.bg, bgVisible: doc.bgVisible, active: layers.findIndex(l => l.id === active), layers: ls };
         const meta = { id: cur.id, name: cur.name, created: cur.created, updated: Date.now(), w: doc.w, h: doc.h, thumb: await makeThumb() };
@@ -1659,8 +1674,9 @@ input[type="range"] { accent-color: var(--accent); }
     layerSeq = 0;
     for (const s of d.layers) {
       const l = makeLayer(s.name); l.visible = s.visible; l.opacity = s.opacity; l.blend = s.blend;
-      if (s.png) { const img = await createImageBitmap(s.png); l.ops = [{ kind: "image", img, opacity: 1, blend: "source-over" }]; rebuild(l); }
+      if (s.png) { const img = await createImageBitmap(s.png); l.ops = [{ kind: "image", img, opacity: 1, blend: "source-over", restored: true }]; rebuild(l); }
       if (s.shadow || s.light) l.shadeSeed = { shadow: s.shadow ? await createImageBitmap(s.shadow) : null, light: s.light ? await createImageBitmap(s.light) : null };
+      if (s.base) { l.baseSeed = await createImageBitmap(s.base); ensureBase(l); }
       built.push(l);
     }
     layers = built; active = (layers[d.active] || layers[layers.length - 1]).id;
