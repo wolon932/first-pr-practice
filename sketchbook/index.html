@@ -1021,7 +1021,6 @@ input[type="range"] { accent-color: var(--accent); }
     b.innerHTML = svg(ic) + '<i class="more"></i>'; b.title = `브러시: ${n} (B, 한 번 더 누르면 종류 고르기)`; b.setAttribute("aria-label", `브러시: ${n}`);
   }
   function setTool(t) {
-    if (t === "eraser" && S.tool !== "eraser") toolBeforeEraser = S.tool;
     if (t !== "text") commitText();
     closeBrushMenu();
     S.tool = t;
@@ -1300,9 +1299,9 @@ input[type="range"] { accent-color: var(--accent); }
     const b = $("input-mode");
     b.setAttribute("aria-pressed", on);
     b.innerHTML = svg(on ? STYLUS_ICON : FINGER_ICON) + `<span class="label">${on ? "펜 모드" : "손가락 모드"}</span>`;
-    b.title = on ? "펜 모드: 펜으로만 그리고 손가락은 화면 이동·확대 (눌러서 손가락 모드로)" : "손가락 모드: 손가락으로도 그려요 (눌러서 펜 모드로)";
+    b.title = on ? "펜 모드: 펜으로만 그리고 두 손가락으로 화면 이동·확대 (눌러서 손가락 모드로)" : "손가락 모드: 손가락으로도 그려요 (눌러서 펜 모드로)";
     if (!auto) { inputChosen = true; try { localStorage.setItem("sketchbook-input", on ? "pen" : "finger"); } catch (e) {} }
-    if (!quiet) toast(on ? (auto ? "펜이 감지돼서 펜 모드로 바꿨어요. 손가락은 화면 이동·확대만 돼요." : "펜 모드: 펜으로만 그리고, 손가락은 화면 이동·확대만 돼요.")
+    if (!quiet) toast(on ? (auto ? "펜이 감지돼서 펜 모드로 바꿨어요. 두 손가락으로 화면 이동·확대만 돼요." : "펜 모드: 펜으로만 그리고, 두 손가락으로 화면 이동·확대만 돼요.")
              : "손가락 모드: 손가락으로도 그릴 수 있어요.");
   }
   $("input-mode").onclick = () => setPenOnly(!S.penOnly);
@@ -1327,7 +1326,7 @@ input[type="range"] { accent-color: var(--accent); }
       if (pointers.size === 2) {
         const [a, b] = [...pointers.values()], c = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
         gesture = { type: "pinch", touch: true, d0: Math.hypot(a.x - b.x, a.y - b.y) || 1, z0: V.z, anchor: toDoc(c) };
-      } else if (pointers.size === 1) gesture = { type: "pan", touch: true, t0: performance.now(), sx: sp.x, sy: sp.y, ox: V.ox, oy: V.oy };
+      } else if (pointers.size === 1) gesture = { type: "wait", touch: true }; // one finger alone does nothing; a second one starts moving the paper
       return;
     }
     if (S.penOnly && gesture && gesture.touch) { pointers.forEach((_, id) => ignored.add(id)); pointers.clear(); gesture = null; } // the pen takes over from fingers
@@ -1392,6 +1391,7 @@ input[type="range"] { accent-color: var(--accent); }
     hover = e.pointerType === "mouse" || (e.pointerType === "pen" && !e.buttons) ? toDoc(sp) : null;
     if (!gesture) { if (S.tool === "brush" || S.tool === "eraser") requestRender(); return; }
     const g = gesture;
+    if (g.type === "wait") return;
     if (S.locked && (g.type === "pinch" || (g.type === "pan" && !g.explicit))) return; // the hand tool still moves a locked paper
     if (g.type === "pinch") {
       if (pointers.size < 2) return;
@@ -1449,7 +1449,6 @@ input[type="range"] { accent-color: var(--accent); }
     if (e.pointerType !== "mouse") hover = null;
     pointers.delete(e.pointerId);
     const g = gesture;
-    if (g && g.type === "pan" && g.touch && g.t0 && !pointers.size) fingerTap(e, g);
     if (!g) return;
     if (g.type === "pinch") { if (pointers.size === 0) gesture = null; return; }
     if (pointers.size) return;
@@ -1484,21 +1483,6 @@ input[type="range"] { accent-color: var(--accent); }
     } else addOp(L.layer, L.op);
   }
   view.addEventListener("pointerup", endPointer);
-
-  // Pen mode: a quick double tap with a finger swaps between the eraser and the tool in use before it.
-  // (The Apple Pencil's own double tap isn't passed to web pages, so a finger double tap stands in for it.)
-  var lastTap = null, toolBeforeEraser = "brush";
-  function fingerTap(e, g) {
-    const sp = screenPt(e), now = performance.now();
-    if (now - g.t0 > 300 || Math.hypot(sp.x - g.sx, sp.y - g.sy) > 12) { lastTap = null; return; }
-    if (lastTap && now - lastTap.t < 400 && Math.hypot(sp.x - lastTap.x, sp.y - lastTap.y) < 60) { lastTap = null; toggleEraser(); return; }
-    lastTap = { t: now, x: sp.x, y: sp.y };
-  }
-  function toggleEraser() {
-    if (S.tool === "eraser") setTool(toolBeforeEraser || "brush");
-    else { toolBeforeEraser = S.tool; setTool("eraser"); }
-    toast(S.tool === "eraser" ? "지우개" : "다시 그리기");
-  }
   view.addEventListener("pointercancel", e => { if (ignored.delete(e.pointerId)) return; pointers.delete(e.pointerId); if (!pointers.size) cancelLive(); });
   view.addEventListener("pointerleave", () => { hover = null; requestRender(); });
   view.addEventListener("wheel", e => {
