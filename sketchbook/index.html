@@ -745,7 +745,7 @@ input[type="range"] { accent-color: var(--accent); }
   // A freehand selection on one layer. Like other drawing apps, every stroke the lasso touches is taken whole (plus
   // whatever lies inside the loop). The selected pixels can be dragged, duplicated, flipped or deleted; the result is one
   // "lasso" op holding the selection mask, replayed by cutting the masked pixels out and pasting them at the offset.
-  let sel = null, lassoDraft = null; // sel: { layer, mask, bx, by, bw, bh, dx, dy, flip, copy, img, hit }
+  let sel = null, lassoDraft = null; // sel: { layer, mask, bx, by, bw, bh, dx, dy, s (scale), r (rotation), flip, copy, img }
   function lassoPath(c, path) { c.beginPath(); path.forEach(([x, y], i) => i ? c.lineTo(x, y) : c.moveTo(x, y)); c.closePath(); }
   function lassoCut(src, op) {
     const [t, tx] = mk(); t.width = Math.max(1, op.bw); t.height = Math.max(1, op.bh);
@@ -758,8 +758,12 @@ input[type="range"] { accent-color: var(--accent); }
     if (!op.copy) { c.globalCompositeOperation = "destination-out"; c.drawImage(op.mask, op.bx, op.by); }
     c.globalCompositeOperation = "source-over";
     if (!op.del) {
-      c.translate(op.bx + op.dx + (op.flip ? op.bw : 0), op.by + op.dy); if (op.flip) c.scale(-1, 1);
-      c.drawImage(img, 0, 0);
+      const sc = op.s || 1;
+      c.translate(op.bx + op.bw / 2 + op.dx, op.by + op.bh / 2 + op.dy);
+      if (op.r) c.rotate(op.r);
+      c.scale(op.flip ? -sc : sc, sc);
+      c.translate(-op.bw / 2, -op.bh / 2);
+      c.imageSmoothingQuality = "high"; c.drawImage(img, 0, 0);
     }
     c.restore();
   }
@@ -800,43 +804,61 @@ input[type="range"] { accent-color: var(--accent); }
     if (x1 - x0 < 2 || y1 - y0 < 2) { sel = null; return; }
     const bx = x0, by = y0, bw = x1 - x0 + 1, bh = y1 - y0 + 1;
     const [mc, mcx] = mk(); mc.width = bw; mc.height = bh; mcx.drawImage(m, bx, by, bw, bh, 0, 0, bw, bh);
-    const hit = new Uint8Array(bw * bh);
-    for (let y = 0; y < bh; y++) for (let x = 0; x < bw; x++) hit[y * bw + x] = a[((by + y) * doc.w + bx + x) * 4 + 3];
-    sel = { layer: l, mask: mc, bx, by, bw, bh, dx: 0, dy: 0, flip: false, copy: false, hit };
+    sel = { layer: l, mask: mc, bx, by, bw, bh, dx: 0, dy: 0, s: 1, r: 0, flip: false, copy: false };
     sel.img = lassoCut(l.cv, sel);
   }
-  const selOp = (extra) => ({ kind: "lasso", mask: sel.mask, bx: sel.bx, by: sel.by, bw: sel.bw, bh: sel.bh, dx: sel.dx, dy: sel.dy, flip: sel.flip, copy: sel.copy, del: false, ...extra });
-  // a press on or near the selected pixels (within a few screen pixels) grabs them
+  const selOp = (extra) => ({ kind: "lasso", mask: sel.mask, bx: sel.bx, by: sel.by, bw: sel.bw, bh: sel.bh, dx: sel.dx, dy: sel.dy, s: sel.s, r: sel.r, flip: sel.flip, copy: sel.copy, del: false, ...extra });
+  // transform box: centre, and the four corners / rotation handle in document coordinates
+  const selChanged = () => sel && (sel.dx || sel.dy || sel.flip || sel.s !== 1 || sel.r);
+  const selCenter = () => ({ x: sel.bx + sel.bw / 2 + sel.dx, y: sel.by + sel.bh / 2 + sel.dy });
+  function selToDoc(ux, uy) { // ux, uy: offsets from the box centre before transform
+    const c = selCenter(), cs = Math.cos(sel.r), sn = Math.sin(sel.r), x = ux * sel.s, y = uy * sel.s;
+    return { x: c.x + x * cs - y * sn, y: c.y + x * sn + y * cs };
+  }
+  function selCorners() { const w = sel.bw / 2, h = sel.bh / 2; return [[-w, -h], [w, -h], [w, h], [-w, h]].map(([x, y]) => selToDoc(x, y)); }
+  function selRotHandle() { const top = selToDoc(0, -sel.bh / 2), c = selCenter(), d = Math.hypot(top.x - c.x, top.y - c.y) || 1, k = 32 / V.z; return { x: top.x + (top.x - c.x) / d * k, y: top.y + (top.y - c.y) / d * k }; }
+  function selHandleAt(d) {
+    if (!sel) return null;
+    const tol = 16 / V.z, rh = selRotHandle();
+    if (Math.hypot(d.x - rh.x, d.y - rh.y) < tol) return { type: "rot" };
+    if (selCorners().some(q => Math.hypot(d.x - q.x, d.y - q.y) < tol)) return { type: "scale" };
+    return null;
+  }
+  // a press inside the transform box grabs the selection
   function inSelection(d) {
     if (!sel) return false;
-    let x = d.x - sel.dx, y = d.y - sel.dy;
-    if (sel.flip) x = 2 * sel.bx + sel.bw - x;
-    x = Math.round(x - sel.bx); y = Math.round(y - sel.by);
-    const r = Math.ceil(12 / V.z);
-    if (x < -r || y < -r || x >= sel.bw + r || y >= sel.bh + r) return false;
-    for (let yy = Math.max(0, y - r); yy <= Math.min(sel.bh - 1, y + r); yy += 2)
-      for (let xx = Math.max(0, x - r); xx <= Math.min(sel.bw - 1, x + r); xx += 2) if (sel.hit[yy * sel.bw + xx]) return true;
-    return false;
+    const c = selCenter(), vx = d.x - c.x, vy = d.y - c.y, cs = Math.cos(-sel.r), sn = Math.sin(-sel.r);
+    const ux = (vx * cs - vy * sn) / sel.s, uy = (vx * sn + vy * cs) / sel.s, pad = 8 / V.z / sel.s;
+    return Math.abs(ux) <= sel.bw / 2 + pad && Math.abs(uy) <= sel.bh / 2 + pad;
   }
   // finish the selection: write what was done to it into the layer (nothing if it was only selected)
   function commitSel(extra) {
     if (!sel) return;
     const s = sel, op = selOp(extra);
     sel = null;
-    if (op.dx || op.dy || op.flip || op.copy || op.del) addOp(s.layer, op); else requestRender(true);
+    if (op.dx || op.dy || op.flip || op.s !== 1 || op.r || op.copy || op.del) addOp(s.layer, op); else requestRender(true);
     if (S.tool === "lasso") renderOptions();
   }
   function cancelSel() { if (!sel) return; sel = null; requestRender(true); if (S.tool === "lasso") renderOptions(); }
-  // on screen: the loop while it is being drawn, then a dashed box around what was selected
+  // on screen: the loop while it is being drawn, then the transform box (corner handles resize, the round one rotates)
   function drawSelOutline(c) {
     if (!sel && (!lassoDraft || lassoDraft.length < 2)) return;
+    const u = 1 / V.z;
     c.save(); c.beginPath();
-    if (sel) c.rect(sel.bx + sel.dx - 3 / V.z, sel.by + sel.dy - 3 / V.z, sel.bw + 6 / V.z, sel.bh + 6 / V.z);
+    if (sel) { const q = selCorners(); q.forEach((p, i) => i ? c.lineTo(p.x, p.y) : c.moveTo(p.x, p.y)); c.closePath(); }
     else lassoDraft.forEach(([x, y], i) => i ? c.lineTo(x, y) : c.moveTo(x, y));
-    c.lineWidth = 1.5 / V.z; c.setLineDash([6 / V.z, 5 / V.z]);
+    c.lineWidth = 1.5 * u; c.setLineDash([6 * u, 5 * u]);
     c.strokeStyle = "rgba(255,255,255,.95)"; c.stroke();
-    c.lineDashOffset = 5.5 / V.z; c.strokeStyle = "rgba(20,20,24,.9)"; c.stroke();
-    if (sel) { c.fillStyle = "rgba(77,141,255,.07)"; c.fillRect(sel.bx + sel.dx, sel.by + sel.dy, sel.bw, sel.bh); }
+    c.lineDashOffset = 5.5 * u; c.strokeStyle = "rgba(20,20,24,.9)"; c.stroke();
+    if (sel) {
+      c.setLineDash([]);
+      const top = selToDoc(0, -sel.bh / 2), rh = selRotHandle();
+      c.strokeStyle = "#4d8dff"; c.lineWidth = 1.5 * u;
+      c.beginPath(); c.moveTo(top.x, top.y); c.lineTo(rh.x, rh.y); c.stroke();
+      c.fillStyle = "#ffffff";
+      c.beginPath(); c.arc(rh.x, rh.y, 7 * u, 0, Math.PI * 2); c.fill(); c.stroke();
+      for (const p of selCorners()) { c.beginPath(); c.rect(p.x - 6 * u, p.y - 6 * u, 12 * u, 12 * u); c.fill(); c.stroke(); }
+    }
     c.restore();
   }
 
@@ -877,7 +899,7 @@ input[type="range"] { accent-color: var(--accent); }
       if (sel && sel.layer === l && !(live && live.layer === l)) {
         tctx.clearRect(x, y, w, h);
         tctx.drawImage(l.cv, x, y, w, h, x, y, w, h);
-        if (sel.dx || sel.dy || sel.flip) applyLasso(tctx, selOp(), sel.img);
+        if (selChanged()) applyLasso(tctx, selOp(), sel.img);
         src = tmp;
       } else if (live && live.layer === l) {
         tctx.clearRect(x, y, w, h);
@@ -1133,9 +1155,10 @@ input[type="range"] { accent-color: var(--accent); }
       if (!sel) parts.push(hint("고르고 싶은 획을 둘러서 그려요. 올가미에 닿은 획은 통째로 골라져요. 지금 레이어에서만 골라져요."));
       else {
         const btn = (id, label, fn, cls = "") => ({ html: `<button id="${id}" class="${cls}">${label}</button>`, bind() { $(id).onclick = fn; } });
-        parts.push(hint("고른 그림을 끌어서 옮겨요."));
+        parts.push(hint("상자 안을 끌면 이동, 모서리는 크기, 위쪽 동그라미는 회전이에요."));
         parts.push(btn("sel-copy", sel.copy ? "복제됨" : "복제", () => { if (sel) { sel.copy = !sel.copy; if (sel.copy && !sel.dx && !sel.dy) { sel.dx = Math.round(20 / V.z); sel.dy = Math.round(20 / V.z); } renderOptions(); requestRender(true); } }));
         parts.push(btn("sel-flip", "좌우 반전", () => { if (sel) { sel.flip = !sel.flip; requestRender(true); } }));
+        parts.push(btn("sel-reset", "원래대로", () => { if (sel) { sel.dx = sel.dy = sel.r = 0; sel.s = 1; sel.flip = false; requestRender(true); } }));
         parts.push(btn("sel-del", "지우기", () => commitSel({ del: true, dx: 0, dy: 0, flip: false, copy: false })));
         parts.push(btn("sel-cancel", "선택 취소", cancelSel));
         parts.push(btn("sel-done", "완료", () => commitSel(), "primary"));
@@ -1528,7 +1551,10 @@ input[type="range"] { accent-color: var(--accent); }
     } else if (tool === "move") {
       live = { kind: "move", layer: l, dx: 0, dy: 0 }; gesture = { type: "move", start: d };
     } else if (tool === "lasso") {
-      if (sel && inSelection(d)) gesture = { type: "selmove", start: d, dx0: sel.dx, dy0: sel.dy };
+      const h = selHandleAt(d);
+      if (h && h.type === "scale") { const c = selCenter(); gesture = { type: "selscale", c, d0: Math.hypot(d.x - c.x, d.y - c.y) || 1, s0: sel.s }; }
+      else if (h && h.type === "rot") { const c = selCenter(); gesture = { type: "selrot", c, a0: Math.atan2(d.y - c.y, d.x - c.x), r0: sel.r }; }
+      else if (sel && inSelection(d)) gesture = { type: "selmove", start: d, dx0: sel.dx, dy0: sel.dy };
       else { commitSel(); lassoDraft = [[d.x, d.y]]; gesture = { type: "lasso" }; }
     }
     requestRender(true);
@@ -1596,6 +1622,12 @@ input[type="range"] { accent-color: var(--accent); }
       const last = lassoDraft[lassoDraft.length - 1];
       if (Math.hypot(d.x - last[0], d.y - last[1]) > 2 / V.z) lassoDraft.push([d.x, d.y]);
       requestRender(); return;
+    } else if (g.type === "selscale") {
+      sel.s = clamp(g.s0 * Math.hypot(d.x - g.c.x, d.y - g.c.y) / g.d0, 0.05, 20);
+    } else if (g.type === "selrot") {
+      let r = g.r0 + Math.atan2(d.y - g.c.y, d.x - g.c.x) - g.a0;
+      const step = Math.PI / 12; if (e.shiftKey || Math.abs(r - Math.round(r / step) * step) < 0.03) r = Math.round(r / step) * step; // snaps to 15°
+      sel.r = r;
     } else if (g.type === "selmove") {
       sel.dx = Math.round(g.dx0 + d.x - g.start.x); sel.dy = Math.round(g.dy0 + d.y - g.start.y);
     }
@@ -1616,7 +1648,7 @@ input[type="range"] { accent-color: var(--accent); }
       if (path && path.length > 2) startSelection(activeLayer(), path);
       renderOptions(); requestRender(true); return;
     }
-    if (g.type === "selmove") { requestRender(true); return; }
+    if (g.type === "selmove" || g.type === "selscale" || g.type === "selrot") { requestRender(true); return; }
     if (!live) { requestRender(); return; }
     const L = live; live = null;
     if (L.kind === "stroke") {
