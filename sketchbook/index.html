@@ -161,6 +161,31 @@ input[type="range"] { accent-color: var(--accent); }
 .dialog .warn { color: #ffb86b; margin: 0; }
 .preview img { max-width: 100%; max-height: 60vh; border-radius: 6px; background: repeating-conic-gradient(#c9ccd2 0 25%, #f2f3f5 0 50%) 0 0 / 16px 16px; }
 
+/* gallery: the first screen, listing saved drawings */
+.gallery { position: fixed; inset: 0; z-index: 9; background: var(--app); overflow: auto; box-sizing: border-box;
+  padding: calc(env(safe-area-inset-top) + 20px) calc(env(safe-area-inset-right) + 20px) calc(env(safe-area-inset-bottom) + 28px) calc(env(safe-area-inset-left) + 20px); }
+.gallery header { display: flex; align-items: baseline; gap: 10px; max-width: 1200px; margin: 0 auto 18px; }
+.gallery h1 { margin: 0; font-size: 22px; font-weight: 600; letter-spacing: -.01em; }
+.gallery h1 b { color: var(--accent); font-weight: 600; }
+.gallery header span { color: var(--muted); }
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(180px, calc(50% - 8px)), 1fr)); gap: 16px 12px; max-width: 1200px; margin: 0 auto; }
+.card { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.card .thumb { aspect-ratio: 4 / 3; width: 100%; border-radius: 12px; border: 1px solid var(--line); background: var(--panel); padding: 0; overflow: hidden; display: grid; place-items: center; }
+.card .thumb:hover { border-color: var(--accent); background: var(--panel); }
+.card .thumb { position: relative; }
+.card .thumb img { position: absolute; inset: 0; margin: auto; max-width: calc(100% - 16px); max-height: calc(100% - 16px); display: block; background: repeating-conic-gradient(#c9ccd2 0 25%, #f2f3f5 0 50%) 0 0 / 12px 12px; box-shadow: 0 2px 10px rgba(0,0,0,.35); }
+.card.new .thumb { border-style: dashed; color: var(--muted); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; font-size: 14px; }
+.card.new .thumb svg.i { width: 34px; height: 34px; }
+.card .meta { display: flex; align-items: center; gap: 4px; min-height: 32px; }
+.card .meta .txt { flex: 1; min-width: 0; }
+.card .name { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.card .when { color: var(--muted); font-size: 12px; }
+.card .meta input { flex: 1; min-width: 0; }
+.card .meta button { min-height: 30px; }
+.card .confirm { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; color: #ffb86b; }
+.card .confirm .danger { background: #c9453e; color: #fff; border-color: transparent; }
+.savestate { color: var(--muted); font-size: 12px; padding: 0 6px; white-space: nowrap; }
+
 .mobile-only { display: none !important; }
 @media (max-width: 820px) {
   .brand, .docsize, .top .label { display: none; }
@@ -178,8 +203,8 @@ input[type="range"] { accent-color: var(--accent); }
 
 <div class="app">
   <header class="top">
-    <div class="brand">나의 <b>스케치북</b></div>
-    <button id="new-btn" title="새 캔버스"><svg class="i" viewBox="0 0 24 24"><path d="M6 3h8l5 5v13H6z"/><path d="M14 3v5h5M12.5 11v6M9.5 14h6"/></svg><span class="label">새 캔버스</span></button>
+    <button id="home-btn" title="내 그림 목록" aria-label="내 그림 목록"><svg class="i" viewBox="0 0 24 24"><path d="M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z"/></svg><span class="label">내 그림</span></button>
+    <button id="new-btn" title="새 캔버스"><svg class="i" viewBox="0 0 24 24"><path d="M6 3h8l5 5v13H6z"/><path d="M14 3v5h5M12.5 11v6M9.5 14h6"/></svg><span class="label">새 그림</span></button>
     <span class="vsep"></span>
     <button id="undo" class="icon" title="되돌리기 (Ctrl+Z)" aria-label="되돌리기" disabled><svg class="i" viewBox="0 0 24 24"><path d="M9 14L4 9l5-5"/><path d="M4 9h10a6 6 0 010 12h-3"/></svg></button>
     <button id="redo" class="icon" title="다시 하기 (Ctrl+Y)" aria-label="다시 하기" disabled><svg class="i" viewBox="0 0 24 24"><path d="M15 14l5-5-5-5"/><path d="M20 9H10a6 6 0 000 12h3"/></svg></button>
@@ -194,9 +219,10 @@ input[type="range"] { accent-color: var(--accent); }
     <button id="sym" class="icon" title="좌우 대칭 그리기" aria-label="좌우 대칭 그리기" aria-pressed="false"><svg class="i" viewBox="0 0 24 24"><path d="M12 3v18" stroke-dasharray="2 3"/><path d="M9 7c-3 1-4 3-4 5s1 4 4 5"/><path d="M15 7c3 1 4 3 4 5s-1 4-4 5"/></svg></button>
     <button id="input-mode" aria-pressed="false"></button>
     <span class="docsize" id="docsize"></span>
+    <span class="savestate" id="savestate" aria-live="polite"></span>
     <div class="spacer"></div>
     <button id="panel-toggle" class="icon mobile-only" title="색상·레이어" aria-label="색상과 레이어 패널"><svg class="i" viewBox="0 0 24 24"><path d="M12 3l9 5-9 5-9-5z"/><path d="M3 13l9 5 9-5"/></svg></button>
-    <button id="save" class="primary" title="PNG로 저장 (Ctrl+S)"><svg class="i" viewBox="0 0 24 24"><path d="M12 4v11"/><path d="M7 10l5 5 5-5"/><path d="M5 20h14"/></svg>저장</button>
+    <button id="save" class="primary" title="PNG로 저장 (Ctrl+S)"><svg class="i" viewBox="0 0 24 24"><path d="M12 4v11"/><path d="M7 10l5 5 5-5"/><path d="M5 20h14"/></svg><span class="label">이미지로 </span>저장</button>
   </header>
 
   <div class="opts" id="opts" role="toolbar" aria-label="도구 설정"></div>
@@ -252,9 +278,14 @@ input[type="range"] { accent-color: var(--accent); }
 
   <div class="menu" id="brush-menu" role="listbox" aria-label="브러시 종류" hidden></div>
 
+  <div class="gallery" id="gallery" hidden>
+    <header><h1>나의 <b>스케치북</b></h1><span id="gallery-count"></span></header>
+    <div class="cards" id="cards"></div>
+  </div>
+
   <div class="modal" id="new-modal" hidden>
-    <div class="dialog" role="dialog" aria-label="새 캔버스">
-      <h2>새 캔버스</h2>
+    <div class="dialog" role="dialog" aria-label="새 그림">
+      <h2>새 그림</h2>
       <div class="presets" id="presets"></div>
       <div class="dims">
         <label>가로 <input type="number" id="new-w" min="64" max="3000"></label>
@@ -265,7 +296,7 @@ input[type="range"] { accent-color: var(--accent); }
         <label>배경색 <input type="color" id="new-bg" value="#ffffff"></label>
         <label><input type="checkbox" id="new-transparent"> 투명 배경</label>
       </div>
-      <p class="warn">지금 캔버스의 그림은 사라져요. 필요하면 먼저 저장하세요.</p>
+      <p class="sublabel">새 그림이 따로 만들어져요. 지금 그림은 내 그림 목록에 그대로 남아요.</p>
       <div class="row"><button id="new-cancel">취소</button><button id="new-ok" class="primary">만들기</button></div>
     </div>
   </div>
@@ -561,6 +592,41 @@ input[type="range"] { accent-color: var(--accent); }
     draw();
     return { data: sampCtx.getImageData(0, 0, doc.w, doc.h).data, cover };
   }
+  // How strongly each pixel is already shaded in this mode (0..255), from every earlier shading stroke on visible layers.
+  // Each shading stroke keeps its own coverage mask (grey = strength); the most any stroke reached is what counts, so a new
+  // stroke only tops up where it is stronger and same-mode shading never builds up. Erased areas drop out (clipped to the layer's pixels).
+  const [covCv, covCtx] = mk(CPU);
+  function shadeMasks(l, mode) {
+    const list = [];
+    if (l.shadeSeed && l.shadeSeed[mode]) list.push({ img: l.shadeSeed[mode], x: 0, y: 0 });
+    for (const o of l.ops) {
+      if (o.kind === "move") list.forEach(m => { m.x += o.dx; m.y += o.dy; });
+      else if (o.shade && o.mask && o.mode === mode) list.push({ img: o.mask, x: o.x, y: o.y });
+    }
+    return list;
+  }
+  function layerShadeCoverage(l, mode) {
+    const list = shadeMasks(l, mode);
+    if (!list.length) return null;
+    covCv.width = doc.w; covCv.height = doc.h;
+    covCtx.fillStyle = "#000"; covCtx.fillRect(0, 0, doc.w, doc.h);
+    covCtx.globalCompositeOperation = "lighten";
+    for (const m of list) covCtx.drawImage(m.img, m.x, m.y);
+    covCtx.globalCompositeOperation = "source-over";
+    const g = covCtx.getImageData(0, 0, doc.w, doc.h).data, a = l.cx.getImageData(0, 0, doc.w, doc.h).data;
+    const out = new Uint8Array(doc.w * doc.h);
+    for (let i = 0; i < out.length; i++) out[i] = a[i * 4 + 3] ? g[i * 4] : 0;
+    return out;
+  }
+  function shadeCoverage(mode) {
+    let out = null;
+    for (const l of layers) {
+      if (!l.visible) continue;
+      const c = layerShadeCoverage(l, mode); if (!c) continue;
+      if (!out) out = c; else for (let i = 0; i < out.length; i++) if (c[i] > out[i]) out[i] = c[i];
+    }
+    return out || new Uint8Array(doc.w * doc.h);
+  }
   // Extends the stroke's coverage mask with the newest points, then recolours the touched area from the snapshot.
   function shadeSegment(L) {
     const op = L.op, p = op.points, from = Math.max(0, L.st.i - 2); // the smoothed curve for point i starts between i-2 and i-1
@@ -574,7 +640,7 @@ input[type="range"] { accent-color: var(--accent); }
     const bw = clamp(Math.ceil(x1 + pad), 0, doc.w) - bx, bh = clamp(Math.ceil(y1 + pad), 0, doc.h) - by;
     if (bw <= 0 || bh <= 0) return;
     const m = mctx.getImageData(bx, by, bw, bh).data, out = lctx.createImageData(bw, bh), o = out.data;
-    const src = L.shade.sample.data, cover = L.shade.sample.cover, cur = L.shade.cur, cache = L.shade.cache;
+    const src = L.shade.sample.data, cover = L.shade.sample.cover, had = L.shade.had, reach = L.shade.reach, cache = L.shade.cache;
     for (let yy = 0; yy < bh; yy++) for (let xx = 0; xx < bw; xx++) {
       const q = (yy * bw + xx) * 4, a = m[q + 3]; if (!a) continue;
       const pi = (by + yy) * doc.w + bx + xx, cv = cover[pi]; if (!cv) continue;
@@ -583,13 +649,11 @@ input[type="range"] { accent-color: var(--accent); }
       const key = (r0 << 16) | (g0 << 8) | b0;
       let c = cache.get(key);
       if (!c) { c = shadeColor(r0, g0, b0, L.shade.mode, L.shade.k, L.shade.hs); cache.set(key, c); }
-      // How much of this target colour is already showing from earlier shading (0..1). Only top up the difference,
-      // so overlapping shading — including soft edges — never builds up darker than one stroke.
-      const ca = cur[s + 3] / 255;
-      const pr = cur[s] * ca + 255 * (1 - ca) - r0, pg = cur[s + 1] * ca + 255 * (1 - ca) - g0, pb = cur[s + 2] * ca + 255 * (1 - ca) - b0;
-      const dr = c[0] - r0, dg = c[1] - g0, db = c[2] - b0, dd = dr * dr + dg * dg + db * db;
-      const have = dd > 9 ? clamp((pr * dr + pg * dg + pb * db) / dd, 0, 1) : 0;
-      const want = (L.shade.soft ? Math.min(1, a / 255 * 1.8) : a / 255) * cv / 255; // soft dabs never fully overlap, so lift the core to full strength; fade out where the drawing itself fades
+      // stroke strength here (soft dabs never fully overlap, so lift the core to full strength)
+      const ms = L.shade.soft ? Math.min(1, a / 255 * 1.8) : a / 255, w8 = Math.round(ms * 255);
+      if (w8 > reach[pi]) reach[pi] = w8;
+      // only top up beyond what earlier same-mode shading already reached here; fade out where the drawing itself fades
+      const want = ms * cv / 255, have = had[pi] / 255 * cv / 255;
       if (want <= have + 0.004) continue;
       o[q] = c[0]; o[q + 1] = c[1]; o[q + 2] = c[2]; o[q + 3] = Math.round(255 * (want - have) / (1 - have));
     }
@@ -1065,7 +1129,7 @@ input[type="range"] { accent-color: var(--accent); }
   $("l-dup").onclick = () => {
     if (layers.length >= MAX_LAYERS) return;
     const s = activeLayer(), l = makeLayer(s.name + " 복사");
-    l.ops = s.ops.slice(); l.opacity = s.opacity; l.blend = s.blend; l.visible = s.visible; rebuild(l);
+    l.ops = s.ops.slice(); l.shadeSeed = s.shadeSeed; l.opacity = s.opacity; l.blend = s.blend; l.visible = s.visible; rebuild(l);
     if (l.ops.some(op => op.shade)) ensureBase(l);
     commit(insertLayerEntry(l, layers.indexOf(s) + 1, active));
   };
@@ -1282,7 +1346,7 @@ input[type="range"] { accent-color: var(--accent); }
         const maskOp = Object.assign({}, op, { brush: S.shadeSoft ? "air" : "pen", color: "#000000", eraser: false });
         mctx.clearRect(0, 0, doc.w, doc.h);
         live = { kind: "stroke", layer: l, op, st: strokeState(maskOp),
-                 shade: { maskOp, sample: sampleWithoutShading(), cur: (renderDoc(), dctx.getImageData(0, 0, doc.w, doc.h).data), mode: S.shadeMode, k: S.shadeStrength / 100, hs: S.shadeHue / 100, soft: S.shadeSoft, cache: new Map() } };
+                 shade: { maskOp, sample: sampleWithoutShading(), had: shadeCoverage(S.shadeMode), reach: new Uint8Array(doc.w * doc.h), mode: S.shadeMode, k: S.shadeStrength / 100, hs: S.shadeHue / 100, soft: S.shadeSoft, cache: new Map() } };
         shadeSegment(live);
       } else {
         const st = strokeState(op); drawStroke(lctx, op, st);
@@ -1376,7 +1440,15 @@ input[type="range"] { accent-color: var(--accent); }
         if (bb.w > 0 && bb.h > 0) {
           const [img, ix] = mk(); img.width = bb.w; img.height = bb.h;
           ix.drawImage(lbuf, bb.x, bb.y, bb.w, bb.h, 0, 0, bb.w, bb.h);
-          addOp(L.layer, { kind: "fill", shade: true, img, x: bb.x, y: bb.y, opacity: L.op.opacity });
+          // this stroke's coverage (grey = strength), so later strokes in the same mode know where shading already is
+          const [mask, mx] = mk(); mask.width = bb.w; mask.height = bb.h;
+          const md = mx.createImageData(bb.w, bb.h), mdd = md.data, reach = L.shade.reach;
+          for (let yy = 0; yy < bb.h; yy++) for (let xx = 0; xx < bb.w; xx++) {
+            const v = reach[(bb.y + yy) * doc.w + bb.x + xx], q = (yy * bb.w + xx) * 4;
+            mdd[q] = mdd[q + 1] = mdd[q + 2] = v; mdd[q + 3] = 255;
+          }
+          mx.putImageData(md, 0, 0);
+          addOp(L.layer, { kind: "fill", shade: true, mode: L.shade.mode, mask, img, x: bb.x, y: bb.y, opacity: L.op.opacity });
         } else requestRender(true);
       } else addOp(L.layer, L.op);
     } else if (L.kind === "move") {
@@ -1398,6 +1470,7 @@ input[type="range"] { accent-color: var(--accent); }
 
   /* ---------------- keyboard ---------------- */
   window.addEventListener("keydown", e => {
+    if (!$("gallery").hidden) return;
     const tag = e.target.tagName;
     if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
     const k = e.key.toLowerCase(), mod = e.ctrlKey || e.metaKey;
@@ -1425,7 +1498,8 @@ input[type="range"] { accent-color: var(--accent); }
     const s = clamp(Math.max(W, H) * d, 1600, 2732) / Math.max(W, H);
     return [Math.round(W * s), Math.round(H * s)];
   }
-  $("new-btn").onclick = () => {
+  $("new-btn").onclick = () => openNewDialog(false);
+  function openNewDialog(fromGallery) {
     const [sw, sh] = screenSize();
     const presets = [["화면 비율", sw, sh], ["정사각형", 2048, 2048], ["가로 16:9", 1920, 1080], ["세로 9:16", 1080, 1920], ["A4 세로", 1754, 2480], ["엽서 가로", 1800, 1200]];
     const p = $("presets"); p.innerHTML = "";
@@ -1433,14 +1507,14 @@ input[type="range"] { accent-color: var(--accent); }
       const b = document.createElement("button"); b.innerHTML = `${n}<small>${w} × ${h}</small>`;
       b.onclick = () => { $("new-w").value = w; $("new-h").value = h; }; p.appendChild(b);
     });
-    $("new-w").value = doc.w; $("new-h").value = doc.h; $("new-bg").value = doc.bg; $("new-transparent").checked = !doc.bgVisible;
+    if (fromGallery) { $("new-w").value = sw; $("new-h").value = sh; $("new-bg").value = "#ffffff"; $("new-transparent").checked = false; }
+    else { $("new-w").value = doc.w; $("new-h").value = doc.h; $("new-bg").value = doc.bg; $("new-transparent").checked = !doc.bgVisible; }
     $("new-modal").hidden = false;
-  };
+  }
   $("new-cancel").onclick = () => $("new-modal").hidden = true;
   $("new-ok").onclick = () => {
     const w = clamp(+$("new-w").value || 1600, 64, 3000), h = clamp(+$("new-h").value || 1200, 64, 3000);
-    resetDoc(w, h, $("new-bg").value, !$("new-transparent").checked);
-    $("new-modal").hidden = true; toast(`${w} × ${h} 새 캔버스를 만들었어요.`);
+    newDrawing(w, h, $("new-bg").value, !$("new-transparent").checked).then(() => toast(`${w} × ${h} 새 그림을 만들었어요.`));
   };
 
   function resetDoc(w, h, bg, bgVisible) {
@@ -1487,60 +1561,190 @@ input[type="range"] { accent-color: var(--accent); }
   $("preview-close").onclick = () => { $("preview").hidden = true; URL.revokeObjectURL($("preview-img").src); };
 
   /* ---------------- start ---------------- */
-  /* ---------------- autosave (this device only) ---------------- */
-  // Keeps the current picture in the browser's own storage so closing the app or refreshing doesn't lose it.
-  // Each layer is stored as a PNG; undo history starts fresh after reopening.
-  const DB = "sketchbook", STORE = "doc";
+  /* ---------------- drawings: autosave and gallery (this device only) ---------------- */
+  // Every drawing is kept in the browser's own storage: "drawings" holds the layers (one PNG each), "meta" the name,
+  // dates and a small preview for the gallery. Changes are saved a moment after each edit. Undo history starts fresh on reopening.
+  const DB = "sketchbook";
+  let dbConn = null;
   function idb() {
+    if (dbConn) return Promise.resolve(dbConn);
     return new Promise((res, rej) => {
-      const r = indexedDB.open(DB, 1);
-      r.onupgradeneeded = () => r.result.createObjectStore(STORE);
-      r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
+      const r = indexedDB.open(DB, 2);
+      r.onupgradeneeded = () => { for (const n of ["doc", "drawings", "meta"]) if (!r.result.objectStoreNames.contains(n)) r.result.createObjectStore(n); };
+      r.onsuccess = () => { dbConn = r.result; dbConn.onversionchange = () => { dbConn.close(); dbConn = null; }; res(dbConn); };
+      r.onerror = () => rej(r.error);
     });
   }
-  async function idbDo(mode, fn) {
+  async function tx(stores, mode, fn) {
     const db = await idb();
-    return new Promise((res, rej) => { const tx = db.transaction(STORE, mode), q = fn(tx.objectStore(STORE)); tx.oncomplete = () => res(q && q.result); tx.onerror = () => rej(tx.error); });
+    return new Promise((res, rej) => {
+      const t = db.transaction(stores, mode), q = fn(...stores.map(n => t.objectStore(n)));
+      t.oncomplete = () => res(q && q.result); t.onerror = () => rej(t.error); t.onabort = () => rej(t.error);
+    });
   }
-  var saveTimer = 0, restoring = true;
-  function scheduleSave() { if (restoring) return; clearTimeout(saveTimer); saveTimer = setTimeout(persist, 1200); }
+  const newId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+  var saveTimer = 0, restoring = true, cur = null, dirty = false; // cur: { id, name, created } of the open drawing
+  function setSaveState(t) { $("savestate").textContent = t; }
+  function scheduleSave() {
+    if (restoring || !cur) return;
+    dirty = true; clearTimeout(saveTimer); setSaveState("저장 중…"); saveTimer = setTimeout(persist, 1000);
+  }
+  async function makeThumb() {
+    renderDoc();
+    const s = Math.min(1, 360 / Math.max(doc.w, doc.h)), [c, x] = mk();
+    c.width = Math.max(1, Math.round(doc.w * s)); c.height = Math.max(1, Math.round(doc.h * s));
+    x.imageSmoothingQuality = "high"; x.drawImage(docCv, 0, 0, c.width, c.height);
+    return new Promise(r => c.toBlob(r, "image/png"));
+  }
+  let saving = null;
   async function persist() {
-    try {
-      const ls = await Promise.all(layers.map(async l => ({
-        name: l.name, visible: l.visible, opacity: l.opacity, blend: l.blend,
-        png: l.ops.length ? await new Promise(r => l.cv.toBlob(r, "image/png")) : null,
-      })));
-      const data = { v: 1, w: doc.w, h: doc.h, bg: doc.bg, bgVisible: doc.bgVisible, active: layers.findIndex(l => l.id === active), layers: ls };
-      await idbDo("readwrite", st => st.put(data, "current"));
-    } catch (e) { /* storage unavailable (private window etc.): keep working without autosave */ }
+    if (!cur) return;
+    if (live) { scheduleSave(); return; } // wait for the stroke to finish
+    dirty = false;
+    const job = (async () => {
+      try {
+        const covPng = async (l, mode) => {
+          const c = layerShadeCoverage(l, mode); if (!c) return null;
+          const [cv, cx] = mk(); cv.width = doc.w; cv.height = doc.h;
+          const im = cx.createImageData(doc.w, doc.h), d = im.data;
+          for (let i = 0; i < c.length; i++) { d[i * 4] = d[i * 4 + 1] = d[i * 4 + 2] = c[i]; d[i * 4 + 3] = 255; }
+          cx.putImageData(im, 0, 0);
+          return new Promise(r => cv.toBlob(r, "image/png"));
+        };
+        const ls = await Promise.all(layers.map(async l => ({
+          name: l.name, visible: l.visible, opacity: l.opacity, blend: l.blend,
+          png: l.ops.length ? await new Promise(r => l.cv.toBlob(r, "image/png")) : null,
+          shadow: l.ops.length ? await covPng(l, "shadow") : null, light: l.ops.length ? await covPng(l, "light") : null,
+        })));
+        const data = { v: 2, w: doc.w, h: doc.h, bg: doc.bg, bgVisible: doc.bgVisible, active: layers.findIndex(l => l.id === active), layers: ls };
+        const meta = { id: cur.id, name: cur.name, created: cur.created, updated: Date.now(), w: doc.w, h: doc.h, thumb: await makeThumb() };
+        await tx(["drawings", "meta"], "readwrite", (d, m) => { d.put(data, cur.id); m.put(meta, cur.id); });
+        setSaveState("저장됨");
+      } catch (e) { dirty = true; setSaveState("자동 저장 안 됨"); /* storage unavailable (private window etc.): keep working */ }
+    })();
+    saving = job; await job; if (saving === job) saving = null;
   }
-  async function restore() {
-    try {
-      const d = await idbDo("readonly", st => st.get("current"));
-      if (!d || !d.layers || !d.layers.length) return false;
-      resetDoc(d.w, d.h, d.bg, d.bgVisible);
-      const built = [];
-      layerSeq = 0;
-      for (const s of d.layers) {
-        const l = makeLayer(s.name); l.visible = s.visible; l.opacity = s.opacity; l.blend = s.blend;
-        if (s.png) { const img = await createImageBitmap(s.png); l.ops = [{ kind: "image", img, opacity: 1, blend: "source-over" }]; rebuild(l); }
-        built.push(l);
-      }
-      layers = built; active = (layers[d.active] || layers[layers.length - 1]).id;
-      updateBgRow(); afterChange(); fit();
-      return true;
-    } catch (e) { return false; }
+  async function saveNow() { clearTimeout(saveTimer); if (saving) await saving; if (cur && !restoring && dirty) await persist(); }
+  async function loadData(d) {
+    resetDoc(d.w, d.h, d.bg, d.bgVisible);
+    const built = [];
+    layerSeq = 0;
+    for (const s of d.layers) {
+      const l = makeLayer(s.name); l.visible = s.visible; l.opacity = s.opacity; l.blend = s.blend;
+      if (s.png) { const img = await createImageBitmap(s.png); l.ops = [{ kind: "image", img, opacity: 1, blend: "source-over" }]; rebuild(l); }
+      if (s.shadow || s.light) l.shadeSeed = { shadow: s.shadow ? await createImageBitmap(s.shadow) : null, light: s.light ? await createImageBitmap(s.light) : null };
+      built.push(l);
+    }
+    layers = built; active = (layers[d.active] || layers[layers.length - 1]).id;
+    updateBgRow(); afterChange(); fit();
   }
-  document.addEventListener("visibilitychange", () => { if (document.hidden && !restoring) { clearTimeout(saveTimer); persist(); } });
-  window.sketchbookSaveNow = () => { if (restoring) return Promise.resolve(); clearTimeout(saveTimer); return persist(); }; // used by the home-screen app before it reloads for an update
+  async function openDrawing(id) {
+    restoring = true;
+    try {
+      const [d, m] = await Promise.all([tx(["drawings"], "readonly", st => st.get(id)), tx(["meta"], "readonly", st => st.get(id))]);
+      if (!d || !m) { toast("그림을 열 수 없어요."); return; }
+      await loadData(d);
+      cur = { id, name: m.name, created: m.created };
+      dirty = false;
+      showEditor(); setSaveState("저장됨");
+    } catch (e) { toast("그림을 열 수 없어요."); }
+    finally { restoring = false; }
+  }
+  async function newDrawing(w, h, bg, bgVisible) {
+    await saveNow();
+    restoring = true;
+    const metas = await listDrawings().catch(() => []);
+    resetDoc(w, h, bg, bgVisible);
+    cur = { id: newId(), name: `그림 ${metas.length + 1}`, created: Date.now() };
+    restoring = false;
+    $("new-modal").hidden = true; showEditor();
+    await persist();
+  }
+  async function listDrawings() {
+    const all = await tx(["meta"], "readonly", m => m.getAll());
+    return (all || []).sort((a, b) => b.updated - a.updated);
+  }
+  function showEditor() { $("gallery").hidden = true; resizeView(); fit(); requestRender(true); }
+
+  const whenText = t => {
+    const s = (Date.now() - t) / 1000;
+    if (s < 60) return "방금 전"; if (s < 3600) return `${Math.floor(s / 60)}분 전`; if (s < 86400) return `${Math.floor(s / 3600)}시간 전`;
+    const d = new Date(t); return `${d.getFullYear()}. ${d.getMonth() + 1}. ${d.getDate()}.`;
+  };
+  let thumbUrls = [];
+  async function showGallery() {
+    await saveNow();
+    commitText(); closeBrushMenu();
+    let metas = [];
+    try { metas = await listDrawings(); } catch (e) { /* no storage: only "new" is offered */ }
+    thumbUrls.forEach(u => URL.revokeObjectURL(u)); thumbUrls = [];
+    const cards = $("cards"); cards.innerHTML = "";
+    const add = document.createElement("div"); add.className = "card new";
+    add.innerHTML = `<button class="thumb" aria-label="새 그림 만들기"><svg class="i" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>새 그림</button><div class="meta"><div class="txt"><div class="when">크기를 골라서 시작해요</div></div></div>`;
+    add.querySelector(".thumb").onclick = () => openNewDialog(true);
+    cards.appendChild(add);
+    for (const m of metas) cards.appendChild(galleryCard(m));
+    $("gallery-count").textContent = metas.length ? `그림 ${metas.length}개` : "";
+    $("gallery").hidden = false;
+  }
+  function galleryCard(m) {
+    const c = document.createElement("div"); c.className = "card";
+    const url = m.thumb ? URL.createObjectURL(m.thumb) : ""; if (url) thumbUrls.push(url);
+    const esc = t => t.replace(/[&<>"]/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[ch]);
+    const normal = () => {
+      c.innerHTML = `<button class="thumb" aria-label="${esc(m.name)} 열기">${url ? `<img alt="" src="${url}">` : ""}</button>
+        <div class="meta"><div class="txt"><div class="name">${esc(m.name)}</div><div class="when">${whenText(m.updated)}</div></div>
+        <button class="icon ren" title="이름 바꾸기" aria-label="이름 바꾸기"><svg class="i" viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16z"/></svg></button>
+        <button class="icon del" title="삭제" aria-label="삭제"><svg class="i" viewBox="0 0 24 24"><path d="M5 7h14M10 7V4h4v3M7 7l1 13h8l1-13"/></svg></button></div>`;
+      c.querySelector(".thumb").onclick = () => openDrawing(m.id);
+      c.querySelector(".ren").onclick = rename;
+      c.querySelector(".del").onclick = () => {
+        c.querySelector(".meta").outerHTML = `<div class="confirm">이 그림을 지울까요? <button class="danger">지우기</button><button class="no">취소</button></div>`;
+        c.querySelector(".no").onclick = normal;
+        c.querySelector(".danger").onclick = async () => {
+          try { await tx(["drawings", "meta"], "readwrite", (d, mm) => { d.delete(m.id); mm.delete(m.id); }); } catch (e) {}
+          showGallery();
+        };
+      };
+    };
+    const rename = () => {
+      const meta = c.querySelector(".meta");
+      meta.innerHTML = `<input type="text" maxlength="40" aria-label="그림 이름"><button class="primary ok">확인</button>`;
+      const inp = meta.querySelector("input"); inp.value = m.name; inp.focus(); inp.select();
+      const done = async () => {
+        const name = inp.value.trim(); if (!name || name === m.name) { normal(); return; }
+        m.name = name; if (cur && cur.id === m.id) cur.name = name;
+        try { await tx(["meta"], "readwrite", mm => mm.put(m, m.id)); } catch (e) {}
+        normal();
+      };
+      meta.querySelector(".ok").onclick = done;
+      inp.addEventListener("keydown", e => { if (e.key === "Enter") done(); if (e.key === "Escape") normal(); });
+    };
+    normal();
+    return c;
+  }
+  $("home-btn").onclick = () => showGallery();
+  document.addEventListener("visibilitychange", () => { if (document.hidden && !restoring && cur && dirty) { clearTimeout(saveTimer); persist(); } });
+  window.sketchbookSaveNow = () => saveNow(); // used by the home-screen app before it reloads for an update
 
   async function start() {
     resizeView();
     const [w, h] = screenSize();
     resetDoc(w, h, "#ffffff", true);
     setColor(S.color); setTool("brush"); updateBrushToolIcon();
-    if (await restore()) toast("그리던 그림을 불러왔어요.");
+    // earlier versions kept a single picture; move it into the drawing list
+    try {
+      const old = await tx(["doc"], "readonly", st => st.get("current"));
+      if (old && old.layers && old.layers.length) {
+        await loadData(old);
+        cur = { id: newId(), name: "그림 1", created: Date.now() };
+        restoring = false; await persist(); restoring = true;
+        await tx(["doc"], "readwrite", st => st.delete("current"));
+        cur = null;
+      }
+    } catch (e) {}
     restoring = false;
+    await showGallery();
   }
   requestAnimationFrame(start);
 })();
