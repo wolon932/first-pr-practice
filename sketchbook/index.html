@@ -1532,6 +1532,7 @@ input[type="range"] { accent-color: var(--accent); }
     } catch (e) { return false; }
   }
   document.addEventListener("visibilitychange", () => { if (document.hidden && !restoring) { clearTimeout(saveTimer); persist(); } });
+  window.sketchbookSaveNow = () => { if (restoring) return Promise.resolve(); clearTimeout(saveTimer); return persist(); }; // used by the home-screen app before it reloads for an update
 
   async function start() {
     resizeView();
@@ -1546,7 +1547,24 @@ input[type="range"] { accent-color: var(--accent); }
 </script>
 
 <script>
-if ("serviceWorker" in navigator) addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {}));
+// Updates: check for a new version whenever the app is opened or brought back, and switch to it right away
+// (the drawing is autosaved first, so nothing is lost).
+if ("serviceWorker" in navigator) {
+  let reloading = false;
+  const hadController = !!navigator.serviceWorker.controller;
+  navigator.serviceWorker.addEventListener("controllerchange", () => {
+    if (!hadController || reloading) return;
+    reloading = true;
+    Promise.resolve(window.sketchbookSaveNow && window.sketchbookSaveNow()).catch(() => {}).then(() => location.reload());
+  });
+  addEventListener("load", () => {
+    navigator.serviceWorker.register("sw.js", { updateViaCache: "none" }).then(reg => {
+      const check = () => reg.update().catch(() => {});
+      document.addEventListener("visibilitychange", () => { if (!document.hidden) check(); });
+      setInterval(check, 30 * 60 * 1000);
+    }).catch(() => {});
+  });
+}
 document.addEventListener("gesturestart", e => e.preventDefault());
 </script>
 </body>
