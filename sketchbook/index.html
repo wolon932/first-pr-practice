@@ -611,9 +611,16 @@ input[type="range"] { accent-color: var(--accent); }
   function shadeMasks(l) {
     const list = [];
     for (const mode of ["shadow", "light"]) if (l.shadeSeed && l.shadeSeed[mode]) list.push({ img: l.shadeSeed[mode], x: 0, y: 0, mode, seed: true });
+    // ordinary paint over shading covers it up, so that spot can be shaded again: paint between shading strokes is
+    // gathered into "cover" images
+    let grp = null;
     for (const o of l.ops) {
-      if (o.kind === "move") list.forEach(m => { m.x += o.dx; m.y += o.dy; });
-      else if (o.shade && o.mask && o.mode) list.push({ img: o.mask, x: o.x, y: o.y, mode: o.mode });
+      if (o.kind === "move") { list.forEach(m => { m.x += o.dx; m.y += o.dy; }); grp = null; }
+      else if (o.shade && o.mask && o.mode) { list.push({ img: o.mask, x: o.x, y: o.y, mode: o.mode }); grp = null; }
+      else if (list.length && !o.shade && !o.eraser && o.kind !== "lasso") {
+        if (!grp) { const [c, x] = mk(CPU); c.width = doc.w; c.height = doc.h; grp = { img: c, cx: x, x: 0, y: 0, cover: true }; list.push(grp); }
+        renderOp(grp.cx, o);
+      }
     }
     return list;
   }
@@ -621,7 +628,7 @@ input[type="range"] { accent-color: var(--accent); }
   // (light over shadow, shadow over light), so that spot can be shaded in the first mode again.
   function layerShadeCoverage(l, mode) {
     const list = shadeMasks(l);
-    if (!list.some(m => m.mode === mode)) return null;
+    if (!list.some(m => m.mode === mode && !m.cover)) return null;
     const W = doc.w, H = doc.h, out = new Uint8Array(W * H);
     for (const m of list) {
       const x0 = Math.max(0, m.x), y0 = Math.max(0, m.y), x1 = Math.min(W, m.x + m.img.width), y1 = Math.min(H, m.y + m.img.height);
@@ -629,6 +636,13 @@ input[type="range"] { accent-color: var(--accent); }
       covCv.width = x1 - x0; covCv.height = y1 - y0;
       covCtx.drawImage(m.img, m.x - x0, m.y - y0);
       const g = covCtx.getImageData(0, 0, x1 - x0, y1 - y0).data, same = m.mode === mode;
+      if (m.cover) {
+        for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) {
+          const a = g[((y - y0) * (x1 - x0) + x - x0) * 4 + 3], i = y * W + x;
+          if (a && out[i]) out[i] = Math.round(out[i] * (255 - a) / 255);
+        }
+        continue;
+      }
       for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) {
         const v = g[((y - y0) * (x1 - x0) + x - x0) * 4], i = y * W + x;
         if (same) { if (v > out[i]) out[i] = v; }
@@ -643,6 +657,8 @@ input[type="range"] { accent-color: var(--accent); }
     let out = null;
     for (const l of layers) {
       if (!l.visible) continue;
+      // a layer above shading hides it where it is painted
+      if (out) { const a = l.cx.getImageData(0, 0, doc.w, doc.h).data, k = l.opacity; for (let i = 0; i < out.length; i++) if (out[i] && a[i * 4 + 3]) out[i] = Math.round(out[i] * (1 - a[i * 4 + 3] / 255 * k)); }
       const c = layerShadeCoverage(l, mode); if (!c) continue;
       if (!out) out = c; else for (let i = 0; i < out.length; i++) if (c[i] > out[i]) out[i] = c[i];
     }
@@ -819,13 +835,23 @@ input[type="range"] { accent-color: var(--accent); }
       else renderOp(mx, ghost);
       mx.restore();
     }
-    // pictures kept only as pixels (a reopened drawing, a merged layer, a bucket fill) have no strokes to look up, so
+    // bucket fills are cut along the loop
+    const [fp, fpx] = mk(CPU); fp.width = doc.w; fp.height = doc.h;
+    let fills = false;
+    for (const op of l.ops) {
+      if (op.shade) continue;
+      if (op.kind === "fill") fills = true;
+      else if (!(op.kind === "move" || op.kind === "lasso" || (op.kind === "stroke" && op.eraser))) continue;
+      renderOp(fpx, op);
+    }
+    if (fills) { fpx.globalCompositeOperation = "destination-in"; lassoPath(fpx, path); fpx.fill(); mx.drawImage(fp, 0, 0); }
+    // pictures kept only as pixels (a merged layer, a drawing saved by an older version) have no strokes to look up, so
     // there the lasso takes every line connected to what it touched
     const [pc, pcx] = mk(CPU); pc.width = doc.w; pc.height = doc.h;
     let pix = false;
     for (const op of l.ops) {
       if (op.shade) continue;
-      if (op.kind === "image" || op.kind === "fill") pix = true;
+      if (op.kind === "image") pix = true;
       else if (!(op.kind === "move" || op.kind === "lasso" || (op.kind === "stroke" && op.eraser))) continue;
       renderOp(pcx, op);
     }
@@ -1868,6 +1894,36 @@ input[type="range"] { accent-color: var(--accent); }
     x.imageSmoothingQuality = "high"; x.drawImage(docCv, 0, 0, c.width, c.height);
     return new Promise(r => c.toBlob(r, "image/png"));
   }
+  // Each layer is saved as its list of strokes and edits (pictures inside them as PNG), so a reopened drawing keeps
+  // every stroke separate: the lasso, undo of later edits and shading work the same as before closing.
+  const blobOf = new WeakMap();
+  const isImg = v => v instanceof HTMLCanvasElement || (typeof ImageBitmap !== "undefined" && v instanceof ImageBitmap);
+  async function imgBlob(v) {
+    let b = blobOf.get(v); if (b) return b;
+    let c = v;
+    if (!(v instanceof HTMLCanvasElement)) { const [cv, cx] = mk(); cv.width = v.width; cv.height = v.height; cx.drawImage(v, 0, 0); c = cv; }
+    b = await new Promise(r => c.toBlob(r, "image/png")); blobOf.set(v, b); return b;
+  }
+  const packOps = ops => Promise.all(ops.map(async op => {
+    const o = {};
+    for (const k in op) { const v = op[k]; o[k] = isImg(v) ? { __img: await imgBlob(v) } : v; }
+    return o;
+  }));
+  async function unpackOps(list) {
+    const memo = new Map();
+    const toCanvas = blob => {
+      if (!memo.has(blob)) memo.set(blob, (async () => {
+        const bm = await createImageBitmap(blob), [c, x] = mk(); c.width = bm.width; c.height = bm.height; x.drawImage(bm, 0, 0);
+        blobOf.set(c, blob); return c;
+      })());
+      return memo.get(blob);
+    };
+    return Promise.all(list.map(async o => {
+      const op = {};
+      for (const k in o) { const v = o[k]; op[k] = v && v.__img ? await toCanvas(v.__img) : v; }
+      return op;
+    }));
+  }
   let saving = null;
   async function persist() {
     if (!cur) return;
@@ -1889,8 +1945,14 @@ input[type="range"] { accent-color: var(--accent); }
           png: l.ops.length ? await new Promise(r => l.cv.toBlob(r, "image/png")) : null,
           shadow: l.ops.length ? await covPng(l, "shadow") : null, light: l.ops.length ? await covPng(l, "light") : null,
           base: l.base && l.ops.length ? await new Promise(r => l.base.toBlob(r, "image/png")) : null, // unshaded picture, so reopened shading starts from the real colours
+          ops: await packOps(l.ops),
+          seeds: {
+            shadow: l.shadeSeed && l.shadeSeed.shadow ? await imgBlob(l.shadeSeed.shadow) : null,
+            light: l.shadeSeed && l.shadeSeed.light ? await imgBlob(l.shadeSeed.light) : null,
+            base: l.baseSeed ? await imgBlob(l.baseSeed) : null,
+          },
         })));
-        const data = { v: 2, w: doc.w, h: doc.h, bg: doc.bg, bgVisible: doc.bgVisible, active: layers.findIndex(l => l.id === active), layers: ls };
+        const data = { v: 3, w: doc.w, h: doc.h, bg: doc.bg, bgVisible: doc.bgVisible, active: layers.findIndex(l => l.id === active), layers: ls };
         const meta = { id: cur.id, name: cur.name, created: cur.created, updated: Date.now(), w: doc.w, h: doc.h, thumb: await makeThumb() };
         await tx(["drawings", "meta"], "readwrite", (d, m) => { d.put(data, cur.id); m.put(meta, cur.id); });
         const t = new Date(); setSaveState(`${t.getHours()}:${String(t.getMinutes()).padStart(2, "0")} 저장됨`);
@@ -1905,6 +1967,17 @@ input[type="range"] { accent-color: var(--accent); }
     layerSeq = 0;
     for (const s of d.layers) {
       const l = makeLayer(s.name); l.visible = s.visible; l.opacity = s.opacity; l.blend = s.blend;
+      if (s.ops) {
+        try {
+          l.ops = await unpackOps(s.ops);
+          const sd = s.seeds || {}, bm = async b => b ? (await unpackOps([{ i: { __img: b } }]))[0].i : null;
+          if (sd.shadow || sd.light) l.shadeSeed = { shadow: await bm(sd.shadow), light: await bm(sd.light) };
+          if (sd.base) l.baseSeed = await bm(sd.base);
+          rebuild(l);
+          if (l.baseSeed || l.ops.some(op => op.shade)) ensureBase(l);
+          built.push(l); continue;
+        } catch (e) { l.ops = []; l.shadeSeed = l.baseSeed = null; } // fall back to the saved picture
+      }
       if (s.png) { const img = await createImageBitmap(s.png); l.ops = [{ kind: "image", img, opacity: 1, blend: "source-over", restored: true }]; rebuild(l); }
       if (s.shadow || s.light) l.shadeSeed = { shadow: s.shadow ? await createImageBitmap(s.shadow) : null, light: s.light ? await createImageBitmap(s.light) : null };
       if (s.base) { l.baseSeed = await createImageBitmap(s.base); ensureBase(l); }
