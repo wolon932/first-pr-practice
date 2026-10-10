@@ -321,6 +321,7 @@ input[type="range"] { accent-color: var(--accent); }
   /* ---------------- constants ---------------- */
   const TOOLS = [
     ["move", "이동", "V", '<path d="M12 3v18M3 12h18M12 3l-3 3M12 3l3 3M12 21l-3-3M12 21l3-3M3 12l3-3M3 12l3 3M21 12l-3-3M21 12l-3 3"/>'],
+    ["lasso", "올가미", "L", '<path d="M12 4c5 0 8 2.2 8 5s-3.6 5-8 5-8-2.2-8-5 3-5 8-5z" stroke-dasharray="3 2.4"/><path d="M7 13c-1.5 1.5-1.5 3.5.5 4.5S8 21 6 21"/>'],
     ["hand", "손", "H", '<path d="M8 13V6a1.5 1.5 0 013 0v5M11 10.5V4.5a1.5 1.5 0 013 0V11M14 11V6a1.5 1.5 0 013 0v7c0 4.5-2.5 8-7 8-3 0-4.5-1.5-6-4l-2-3.5a1.5 1.5 0 012.6-1.5L8 15"/>'],
     ["brush", "브러시", "B", '<path d="M19 3l2 2-9.5 9.5-2-2z"/><path d="M9.5 12.5C6 12.5 5.5 15 5.5 16.5 5.5 18 4.5 19.5 3 20c3.5 1 8 .5 8.5-4"/>'],
     ["eraser", "지우개", "E", '<path d="M7 20h12"/><path d="M5 15l9-9 5 5-8 8H8z"/><path d="M9.5 10.5l5 5"/>'],
@@ -734,7 +735,68 @@ input[type="range"] { accent-color: var(--accent); }
     } else if (op.kind === "image") {
       c.globalCompositeOperation = op.blend || "source-over";
       c.drawImage(op.img, 0, 0);
+    } else if (op.kind === "lasso") {
+      applyLasso(c, op, lassoCut(c.canvas, op));
     }
+    c.restore();
+  }
+
+  /* ---------------- lasso selection ---------------- */
+  // A freehand selection on one layer. The selected pixels can be dragged, duplicated, flipped or deleted; the result is
+  // one "lasso" op, replayed by cutting the outline out of the layer and pasting it at the offset.
+  let sel = null, lassoDraft = null; // sel: { layer, path, bx, by, bw, bh, dx, dy, flip, copy, img }
+  function lassoPath(c, path) { c.beginPath(); path.forEach(([x, y], i) => i ? c.lineTo(x, y) : c.moveTo(x, y)); c.closePath(); }
+  function lassoCut(src, op) {
+    const [t, tx] = mk(); t.width = Math.max(1, op.bw); t.height = Math.max(1, op.bh);
+    tx.translate(-op.bx, -op.by); lassoPath(tx, op.path); tx.clip(); tx.drawImage(src, 0, 0);
+    return t;
+  }
+  function applyLasso(c, op, img) {
+    c.save();
+    if (!op.copy) { c.globalCompositeOperation = "destination-out"; lassoPath(c, op.path); c.fill(); c.lineWidth = 1; c.stroke(); }
+    c.globalCompositeOperation = "source-over";
+    if (!op.del) {
+      c.translate(op.bx + op.dx + (op.flip ? op.bw : 0), op.by + op.dy); if (op.flip) c.scale(-1, 1);
+      c.drawImage(img, 0, 0);
+    }
+    c.restore();
+  }
+  function startSelection(l, path) {
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const [x, y] of path) { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y); }
+    const bx = clamp(Math.floor(x0) - 1, 0, doc.w), by = clamp(Math.floor(y0) - 1, 0, doc.h);
+    const bw = clamp(Math.ceil(x1) + 1, 0, doc.w) - bx, bh = clamp(Math.ceil(y1) + 1, 0, doc.h) - by;
+    if (bw < 3 || bh < 3) { sel = null; return; }
+    sel = { layer: l, path, bx, by, bw, bh, dx: 0, dy: 0, flip: false, copy: false };
+    sel.img = lassoCut(l.cv, sel);
+  }
+  const selOp = (extra) => ({ kind: "lasso", path: sel.path, bx: sel.bx, by: sel.by, bw: sel.bw, bh: sel.bh, dx: sel.dx, dy: sel.dy, flip: sel.flip, copy: sel.copy, del: false, ...extra });
+  function inSelection(d) {
+    if (!sel) return false;
+    let x = d.x - sel.dx, y = d.y - sel.dy;
+    if (sel.flip) x = 2 * sel.bx + sel.bw - x;
+    if (x < sel.bx || y < sel.by || x > sel.bx + sel.bw || y > sel.by + sel.bh) return false;
+    lassoPath(covCtx, sel.path); return covCtx.isPointInPath(x, y);
+  }
+  // finish the selection: write what was done to it into the layer (nothing if it was only selected)
+  function commitSel(extra) {
+    if (!sel) return;
+    const s = sel, op = selOp(extra);
+    sel = null;
+    if (op.dx || op.dy || op.flip || op.copy || op.del) addOp(s.layer, op); else requestRender(true);
+    if (S.tool === "lasso") renderOptions();
+  }
+  function cancelSel() { if (!sel) return; sel = null; requestRender(true); if (S.tool === "lasso") renderOptions(); }
+  // the selection's outline on screen, with its current offset and flip
+  function drawSelOutline(c) {
+    const path = sel ? sel.path : lassoDraft;
+    if (!path || path.length < 2) return;
+    c.save();
+    if (sel) { c.translate(sel.dx + (sel.flip ? 2 * sel.bx + sel.bw : 0), sel.dy); if (sel.flip) c.scale(-1, 1); }
+    c.beginPath(); path.forEach(([x, y], i) => i ? c.lineTo(x, y) : c.moveTo(x, y)); if (sel) c.closePath();
+    c.lineWidth = 1.5 / V.z; c.setLineDash([6 / V.z, 5 / V.z]);
+    c.strokeStyle = "rgba(255,255,255,.95)"; c.stroke();
+    c.lineDashOffset = 5.5 / V.z; c.strokeStyle = "rgba(20,20,24,.9)"; c.stroke();
     c.restore();
   }
 
@@ -772,7 +834,12 @@ input[type="range"] { accent-color: var(--accent); }
     for (const l of layers) {
       if (!l.visible) continue;
       let src = l.cv;
-      if (live && live.layer === l) {
+      if (sel && sel.layer === l && !(live && live.layer === l)) {
+        tctx.clearRect(x, y, w, h);
+        tctx.drawImage(l.cv, x, y, w, h, x, y, w, h);
+        if (sel.dx || sel.dy || sel.flip) applyLasso(tctx, selOp(), sel.img);
+        src = tmp;
+      } else if (live && live.layer === l) {
         tctx.clearRect(x, y, w, h);
         if (live.kind === "move") tctx.drawImage(l.cv, live.dx, live.dy);
         else {
@@ -806,6 +873,7 @@ input[type="range"] { accent-color: var(--accent); }
     vctx.imageSmoothingEnabled = V.z * dpr < 4; // only show hard pixels when zoomed far in
     vctx.drawImage(docCv, 0, 0);
     vctx.imageSmoothingEnabled = true;
+    drawSelOutline(vctx);
     if (S.sym) {
       vctx.save(); vctx.strokeStyle = "rgba(77,141,255,.8)"; vctx.lineWidth = 1.5 / V.z; vctx.setLineDash([8 / V.z, 6 / V.z]);
       vctx.beginPath(); vctx.moveTo(doc.w / 2, 0); vctx.lineTo(doc.w / 2, doc.h); vctx.stroke(); vctx.restore();
@@ -877,7 +945,7 @@ input[type="range"] { accent-color: var(--accent); }
     if (undoStack.length > MAX_HISTORY) undoStack.shift();
     afterChange();
   }
-  function undo() { if (live) return; const e = undoStack.pop(); if (!e) return; e.undo(); redoStack.push(e); afterChange(); }
+  function undo() { if (live) return; if (sel) { cancelSel(); return; } const e = undoStack.pop(); if (!e) return; e.undo(); redoStack.push(e); afterChange(); }
   function redo() { if (live) return; const e = redoStack.pop(); if (!e) return; e.redo(); undoStack.push(e); afterChange(); }
   function afterChange() {
     if (!activeLayer()) active = layers[layers.length - 1].id;
@@ -1021,6 +1089,17 @@ input[type="range"] { accent-color: var(--accent); }
       parts.push(hint("캔버스를 누르면 그 자리의 색을 가져와요. 브러시를 쓰다가 Alt를 누른 채 클릭해도 돼요."));
     } else if (t === "move") {
       parts.push(hint("드래그하면 선택한 레이어 전체가 움직여요."));
+    } else if (t === "lasso") {
+      if (!sel) parts.push(hint("고르고 싶은 부분을 둘러서 그려요. 지금 레이어에서 골라져요."));
+      else {
+        const btn = (id, label, fn, cls = "") => ({ html: `<button id="${id}" class="${cls}">${label}</button>`, bind() { $(id).onclick = fn; } });
+        parts.push(hint("안쪽을 끌어서 옮겨요."));
+        parts.push(btn("sel-copy", sel.copy ? "복제됨" : "복제", () => { if (sel) { sel.copy = !sel.copy; if (sel.copy && !sel.dx && !sel.dy) { sel.dx = Math.round(20 / V.z); sel.dy = Math.round(20 / V.z); } renderOptions(); requestRender(true); } }));
+        parts.push(btn("sel-flip", "좌우 반전", () => { if (sel) { sel.flip = !sel.flip; requestRender(true); } }));
+        parts.push(btn("sel-del", "지우기", () => commitSel({ del: true, dx: 0, dy: 0, flip: false, copy: false })));
+        parts.push(btn("sel-cancel", "선택 취소", cancelSel));
+        parts.push(btn("sel-done", "완료", () => commitSel(), "primary"));
+      }
     } else if (t === "hand") {
       parts.push(hint("드래그해서 화면을 옮겨요. 휠로 확대·축소, 스페이스를 누른 채 드래그해도 옮겨져요. 터치는 두 손가락."));
     }
@@ -1048,6 +1127,7 @@ input[type="range"] { accent-color: var(--accent); }
     b.innerHTML = svg(ic) + '<i class="more"></i>'; b.title = `브러시: ${n} (B, 한 번 더 누르면 종류 고르기)`; b.setAttribute("aria-label", `브러시: ${n}`);
   }
   function setTool(t) {
+    if (t !== "lasso") commitSel();
     if (t !== "text") commitText();
     closeBrushMenu();
     S.tool = t;
@@ -1310,10 +1390,10 @@ input[type="range"] { accent-color: var(--accent); }
 
   /* ---------------- pointer input ---------------- */
   const pointers = new Map();
-  function cancelLive() { live = null; gesture = null; requestRender(true); }
+  function cancelLive() { live = null; gesture = null; lassoDraft = null; requestRender(true); }
   function needVisible(l) { if (!l.visible) { toast("숨긴 레이어예요. 눈 아이콘을 눌러 보이게 한 뒤 그려 주세요."); return false; } return true; }
 
-  // Pen mode: only a stylus (or mouse) draws. One finger pans, two fingers pinch-zoom, and any finger or palm
+  // Pen mode: only a stylus (or mouse) draws. Two fingers move and zoom the paper (one alone does nothing), and any finger or palm
   // that lands while the pen is working is ignored.
   const ignored = new Set();
   const capture = e => { try { view.setPointerCapture(e.pointerId); } catch (err) {} };
@@ -1407,6 +1487,9 @@ input[type="range"] { accent-color: var(--accent); }
       gesture = { type: "sticker", start: d };
     } else if (tool === "move") {
       live = { kind: "move", layer: l, dx: 0, dy: 0 }; gesture = { type: "move", start: d };
+    } else if (tool === "lasso") {
+      if (sel && inSelection(d)) gesture = { type: "selmove", start: d, dx0: sel.dx, dy0: sel.dy };
+      else { commitSel(); lassoDraft = [[d.x, d.y]]; gesture = { type: "lasso" }; }
     }
     requestRender(true);
   });
@@ -1469,6 +1552,12 @@ input[type="range"] { accent-color: var(--accent); }
       if (dist > 8 / V.z) live.op.size = Math.max(12, dist * 2);
     } else if (g.type === "move") {
       live.dx = Math.round(d.x - g.start.x); live.dy = Math.round(d.y - g.start.y);
+    } else if (g.type === "lasso") {
+      const last = lassoDraft[lassoDraft.length - 1];
+      if (Math.hypot(d.x - last[0], d.y - last[1]) > 2 / V.z) lassoDraft.push([d.x, d.y]);
+      requestRender(); return;
+    } else if (g.type === "selmove") {
+      sel.dx = Math.round(g.dx0 + d.x - g.start.x); sel.dy = Math.round(g.dy0 + d.y - g.start.y);
     }
     requestRender(true);
   });
@@ -1482,6 +1571,12 @@ input[type="range"] { accent-color: var(--accent); }
     if (g.type === "pinch") { if (pointers.size === 0) gesture = null; return; }
     if (pointers.size) return;
     gesture = null; updateCursor();
+    if (g.type === "lasso") {
+      const path = lassoDraft; lassoDraft = null;
+      if (path && path.length > 2) startSelection(activeLayer(), path);
+      renderOptions(); requestRender(true); return;
+    }
+    if (g.type === "selmove") { requestRender(true); return; }
     if (!live) { requestRender(); return; }
     const L = live; live = null;
     if (L.kind === "stroke") {
@@ -1573,6 +1668,7 @@ input[type="range"] { accent-color: var(--accent); }
   };
 
   function resetDoc(w, h, bg, bgVisible) {
+    sel = null; lassoDraft = null;
     doc.w = w; doc.h = h; doc.bg = bg; doc.bgVisible = bgVisible;
     [docCv, tmp, sbuf, lbuf, mvCv, maskCv, tailCv].forEach(c => { c.width = w; c.height = h; });
     layerSeq = 0; layers = [makeLayer()]; active = layers[0].id;
@@ -1710,6 +1806,7 @@ input[type="range"] { accent-color: var(--accent); }
     finally { restoring = false; }
   }
   async function newDrawing(w, h, bg, bgVisible) {
+    commitSel();
     await saveNow();
     restoring = true;
     const metas = await listDrawings().catch(() => []);
@@ -1732,6 +1829,7 @@ input[type="range"] { accent-color: var(--accent); }
   };
   let thumbUrls = [];
   async function showGallery() {
+    commitSel();
     await saveNow();
     commitText(); closeBrushMenu();
     let metas = [];
