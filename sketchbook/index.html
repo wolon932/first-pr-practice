@@ -378,7 +378,7 @@ input[type="range"] { accent-color: var(--accent); }
 
   const mk = opts => { const c = document.createElement("canvas"); return [c, c.getContext("2d", opts)]; };
   const CPU = { willReadFrequently: true }; // for canvases we read pixels back from every frame
-  const [docCv, dctx] = mk(), [tmp, tctx] = mk(), [sbuf, sctx] = mk(), [lbuf, lctx] = mk(), [mvCv, mvctx] = mk(), [maskCv, mctx] = mk(CPU);
+  const [docCv, dctx] = mk(), [tmp, tctx] = mk(), [sbuf, sctx] = mk(), [lbuf, lctx] = mk(), [mvCv, mvctx] = mk(), [maskCv, mctx] = mk(CPU), [tailCv, tailCtx] = mk();
   const view = $("view"), vctx = view.getContext("2d"), work = $("work");
   let dpr = 1;
 
@@ -748,6 +748,19 @@ input[type="range"] { accent-color: var(--accent); }
   function rebuild(l) { l.cx.clearRect(0, 0, doc.w, doc.h); l.ops.forEach(op => renderOp(l.cx, op)); if (l.base) rebuildBase(l); }
 
   /* ---------------- rendering ---------------- */
+  // The stroke so far plus its last stretch up to where the pen actually is right now. The smoothing keeps the
+  // settled line a little behind the pen; drawing this tail each frame keeps the line under the pen tip, and it is
+  // exactly what gets added when the pen lifts, so nothing new appears at the end.
+  function liveStrokeBuf(box) {
+    const g = gesture;
+    if (!live || live.shade || !g || g.type !== "stroke" || !g.raw || !live.op.points.length) return lbuf;
+    const op = live.op, end = [g.raw.x, g.raw.y, g.p];
+    tailCtx.clearRect(box.x, box.y, box.w, box.h);
+    tailCtx.drawImage(lbuf, box.x, box.y, box.w, box.h, box.x, box.y, box.w, box.h);
+    const tail = Object.assign({}, op, { points: op.points.concat([end, end.slice()]) });
+    drawStroke(tailCtx, tail, { i: live.st.i, rem: live.st.rem, rand: rng(op.seed + live.st.i), dab: live.st.dab });
+    return tailCv;
+  }
   // Recomposites the document. While a stroke is being drawn only the box around the newest part is redone (box),
   // which keeps drawing smooth on large canvases.
   function renderDoc(box) {
@@ -764,7 +777,7 @@ input[type="range"] { accent-color: var(--accent); }
         if (live.kind === "move") tctx.drawImage(l.cv, live.dx, live.dy);
         else {
           tctx.drawImage(l.cv, x, y, w, h, x, y, w, h);
-          if (live.kind === "stroke") blitStroke(tctx, lbuf, live.op, { x, y, w, h }); else renderOp(tctx, live.op);
+          if (live.kind === "stroke") blitStroke(tctx, liveStrokeBuf({ x, y, w, h }), live.op, { x, y, w, h }); else renderOp(tctx, live.op);
         }
         src = tmp;
       }
@@ -1419,7 +1432,7 @@ input[type="range"] { accent-color: var(--accent); }
       const op = live.op, evs = e.getCoalescedEvents ? e.getCoalescedEvents() : [], n0 = op.points.length;
       // The drawn point trails the pen on a short string: it only moves once the pen is further away than the string's
       // length, so tremble and uneven reports are absorbed. A light easing on top rounds off the remaining corners.
-      const R = (S.smooth / 100) * 20 / V.z, ease = 1 - (S.smooth / 100) * 0.6;
+      const R = live.shade ? 0 : (S.smooth / 100) * 16 / V.z, ease = 1 - (S.smooth / 100) * 0.6;
       for (const ev of (evs.length ? evs : [e])) {
         const r = toDoc(screenPt(ev)), last = g.last;
         const ddx = r.x - g.lazy.x, ddy = r.y - g.lazy.y, dist = Math.hypot(ddx, ddy);
@@ -1434,7 +1447,9 @@ input[type="range"] { accent-color: var(--accent); }
       if (!live.shade) drawStroke(lctx, op, live.st); // shading is processed once per frame in renderDoc
       // only the stretch of stroke that changed needs recompositing
       let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
-      for (let i = Math.max(0, n0 - 3); i < op.points.length; i++) { const q = op.points[i]; x0 = Math.min(x0, q[0]); y0 = Math.min(y0, q[1]); x1 = Math.max(x1, q[0]); y1 = Math.max(y1, q[1]); }
+      const tipPts = [g.raw, g.prevRaw].filter(Boolean).map(q => [q.x, q.y]);
+      for (const q of op.points.slice(Math.max(0, n0 - 3)).concat(tipPts)) { x0 = Math.min(x0, q[0]); y0 = Math.min(y0, q[1]); x1 = Math.max(x1, q[0]); y1 = Math.max(y1, q[1]); }
+      g.prevRaw = g.raw;
       if (x0 === Infinity) { requestRender(); return; }
       if (op.mirror) { const a = op.mirror - x1, b = op.mirror - x0; x0 = Math.min(x0, a); x1 = Math.max(x1, b); }
       const pad = op.size + 4;
@@ -1559,7 +1574,7 @@ input[type="range"] { accent-color: var(--accent); }
 
   function resetDoc(w, h, bg, bgVisible) {
     doc.w = w; doc.h = h; doc.bg = bg; doc.bgVisible = bgVisible;
-    [docCv, tmp, sbuf, lbuf, mvCv, maskCv].forEach(c => { c.width = w; c.height = h; });
+    [docCv, tmp, sbuf, lbuf, mvCv, maskCv, tailCv].forEach(c => { c.width = w; c.height = h; });
     layerSeq = 0; layers = [makeLayer()]; active = layers[0].id;
     undoStack = []; redoStack = []; live = null; gesture = null;
     $("docsize").textContent = `${w} × ${h}`;
