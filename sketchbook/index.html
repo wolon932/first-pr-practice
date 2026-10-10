@@ -884,7 +884,7 @@ input[type="range"] { accent-color: var(--accent); }
              bind() { const i = $(id); i.addEventListener("input", () => { on(+i.value); $(id + "-out").textContent = fmt(+i.value); }); } };
   }
   // Size slider on a curve: most of the track is spent on small sizes, where a few pixels make a visible difference.
-  const SIZE_MAX = { pen: 60, pencil: 40, marker: 120, ink: 80, air: 300, shade: 200 };
+  const SIZE_MAX = { pen: 150, pencil: 150, marker: 150, ink: 150, air: 300, shade: 200 };
   const SIZE_CURVE = 2.2;
   const sizeToPos = (v, min, max) => Math.round(1000 * Math.pow(clamp((v - min) / (max - min), 0, 1), 1 / SIZE_CURVE));
   const posToSize = (t, min, max) => Math.round(min + (max - min) * Math.pow(t / 1000, SIZE_CURVE));
@@ -977,7 +977,7 @@ input[type="range"] { accent-color: var(--accent); }
     } else if (t === "shape") {
       parts.push(seg("o-shape", SHAPES, S.shape, k => S.shape = k));
       parts.push(seg("o-sfill", [["line", "선만"], ["fill", "면 채우기"]], S.shapeFill ? "fill" : "line", k => S.shapeFill = k === "fill"));
-      parts.push(sizeSlider("굵기", 1, 60, S.shapeSize, v => S.shapeSize = v));
+      parts.push(sizeSlider("굵기", 1, 150, S.shapeSize, v => S.shapeSize = v));
       parts.push(slider("o-op", "불투명도", 1, 100, S.shapeOpacity, pct, v => S.shapeOpacity = v));
       parts.push(hint("Shift: 정사각형·정원·45° 직선"));
     } else if (t === "text") {
