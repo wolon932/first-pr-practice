@@ -2015,11 +2015,13 @@ input[type="range"] { accent-color: var(--accent); }
         g.last = { x: nx, y: ny };
         g.pr += ((g.pen ? ev.pressure || 0.5 : g.speed ? 1 : 0.5) - g.pr) * 0.3; // Apple Pencil pressure jumps between reports; ease it so the width doesn't wobble
         if (g.speed) {
-          // speed in screen pixels per millisecond: very slow ≈ 1.35× the width, about 0.4 ≈ the set width, fast (1.2 and up) ≈ a third
+          // speed in screen pixels per millisecond: very slow ≈ 1.5× the width, about 0.55 ≈ the set width, fast (1 and up) ≈ half.
+          // It multiplies the width pressure gives, so p is worked back from that width (widthAt: size·(pmin + (1 − pmin)·p)).
           const dt = Math.max(4, (ev.timeStamp || 0) - g.t), v = Math.hypot(r0.x - hl[0], r0.y - hl[1]) * V.z / dt;
           g.t = ev.timeStamp || g.t + dt;
-          g.sf += (clamp(1.4 - 1.0 * v, 0.33, 1.35) - g.sf) * 0.25;
-          g.p = g.pr * g.sf;
+          g.sf += (clamp(1.6 - 1.1 * v, 0.5, 1.5) - g.sf) * 0.25;
+          const m = BR[S.brush].pmin ?? 0.22;
+          g.p = ((m + (1 - m) * g.pr) * g.sf - m) / (1 - m);
         } else g.p = g.pr;
         op.points.push([nx, ny, g.p]);
       }
