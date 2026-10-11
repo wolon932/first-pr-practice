@@ -83,6 +83,11 @@ input[type="range"] { accent-color: var(--accent); }
 .menu { position: fixed; z-index: 20; width: 220px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 4px; box-shadow: 0 12px 32px rgba(0,0,0,.5); display: flex; flex-direction: column; gap: 2px; }
 .menu button { justify-content: flex-start; gap: 10px; min-height: 40px; padding: 0 10px; }
 .menu button[aria-selected="true"] { background: var(--accent); color: #fff; }
+#brush-menu { width: 312px; max-height: min(78vh, 640px); overflow-y: auto; overscroll-behavior: contain; }
+#brush-menu .mgroup { color: var(--muted); font-size: 11px; padding: 8px 6px 2px; }
+#brush-menu .mgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
+#brush-menu .mgrid button { flex-direction: column; align-items: stretch; gap: 4px; min-height: 0; padding: 6px; font-size: 12px; text-align: left; justify-content: flex-start; }
+#brush-menu .mgrid canvas { width: 100%; height: 34px; }
 .seg button[aria-pressed="true"] { background: var(--accent); color: #fff; border-color: transparent; }
 .sl { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); }
 .sl input[type="range"] { width: 120px; }
@@ -346,15 +351,87 @@ input[type="range"] { accent-color: var(--accent); }
     ["text", "텍스트", "T", '<path d="M5 7V4h14v3M12 4v16M9 20h6"/>'],
     ["sticker", "스티커", "S", '<path d="M12 3l2.6 5.6 6 .7-4.5 4.1 1.3 6L12 16.4 6.6 19.4l1.3-6L3.4 9.3l6-.7z"/>'],
   ];
-  const BRUSHES = [
-    ["pen", "펜", '<path d="M16 3l5 5L9 20H4v-5z"/><path d="M13.5 5.5l5 5"/><path d="M4 20l3-3"/>'],
-    ["pencil", "연필", '<path d="M8.5 19.5L4 20l.5-4.5L15.5 4.5a2.1 2.1 0 013 0l1 1a2.1 2.1 0 010 3z"/><path d="M4.5 15.5l4 4"/><path d="M13.5 6.5l4 4"/><path d="M4 20l.25-2.25 2 2z" fill="currentColor"/>'],
-    ["marker", "마커", '<path d="M10 2.5h4l1 4H9z"/><path d="M8 6.5h8v14a1 1 0 01-1 1H9a1 1 0 01-1-1z"/><path d="M8 11h8"/><path d="M11 2.5L12 1h0l1 1.5"/>'],
-    ["air", "에어브러시", '<rect x="5" y="10" width="9" height="11" rx="2"/><path d="M7 10V7h5v3"/><path d="M9.5 7V4.5h2"/><circle cx="16.5" cy="4.5" r=".7" fill="currentColor"/><circle cx="19" cy="3" r=".7" fill="currentColor"/><circle cx="19.5" cy="6" r=".7" fill="currentColor"/><circle cx="21.5" cy="4.5" r=".7" fill="currentColor"/><circle cx="17" cy="7.5" r=".7" fill="currentColor"/>'],
-    ["ink", "붓펜", '<path d="M21 3c-3.5 1.5-8.5 6-10.5 9l2 2c3-2 7.5-7 8.5-11z"/><path d="M10.5 12C8 12 6.5 13.5 6.5 15.5c0 1.5-1 3-2.5 3.5 3 1.2 7.5.5 8.5-5"/>'],
-    ["shade", "음영 펜", '<path d="M16 3l5 5-9 9-5-5z"/><path d="M7 12l-3 9 9-3"/><circle cx="18.5" cy="18.5" r="3"/><path d="M18.5 15.5a3 3 0 010 6z" fill="currentColor"/>'],
+  // Brush kinds, in groups. eng says how a brush is drawn:
+  //   body   - one smooth outline; options: feather (soft edge), grain + tex (paper texture), wet (watercolour edge),
+  //            flat (flat nib), taper (thin start), press (Apple Pencil pressure, pmin = thinnest), speed (thinner when fast),
+  //            cap, blend
+  //   pencil - grain dots (dens, dot); air - soft dabs (hard); spray - particles; ink - calligraphy nib;
+  //   oil    - bristle streaks (body = how solid); smudge - drags the colours already on the layer; shade - shading pen
+  // Each entry: [id, name, icon, options, preview width, default width, default opacity].
+  const IC = {
+    pen: '<path d="M16 3l5 5L9 20H4v-5z"/><path d="M13.5 5.5l5 5"/><path d="M4 20l3-3"/>',
+    pencil: '<path d="M8.5 19.5L4 20l.5-4.5L15.5 4.5a2.1 2.1 0 013 0l1 1a2.1 2.1 0 010 3z"/><path d="M4.5 15.5l4 4"/><path d="M13.5 6.5l4 4"/><path d="M4 20l.25-2.25 2 2z" fill="currentColor"/>',
+    marker: '<path d="M10 2.5h4l1 4H9z"/><path d="M8 6.5h8v14a1 1 0 01-1 1H9a1 1 0 01-1-1z"/><path d="M8 11h8"/><path d="M11 2.5L12 1h0l1 1.5"/>',
+    hl: '<path d="M9 3h6v5l-2 2v3h-2v-3L9 8z"/><path d="M4 20h16"/><path d="M8 17h8" stroke-width="3" opacity=".5"/>',
+    air: '<rect x="5" y="10" width="9" height="11" rx="2"/><path d="M7 10V7h5v3"/><path d="M9.5 7V4.5h2"/><circle cx="16.5" cy="4.5" r=".7" fill="currentColor"/><circle cx="19" cy="3" r=".7" fill="currentColor"/><circle cx="19.5" cy="6" r=".7" fill="currentColor"/><circle cx="21.5" cy="4.5" r=".7" fill="currentColor"/><circle cx="17" cy="7.5" r=".7" fill="currentColor"/>',
+    spray: '<rect x="6" y="9" width="8" height="12" rx="1.5"/><path d="M8 9V6h4v3"/><path d="M12 6h2"/><circle cx="17" cy="4" r=".8" fill="currentColor"/><circle cx="20" cy="6" r=".8" fill="currentColor"/><circle cx="18" cy="8" r=".8" fill="currentColor"/><circle cx="21" cy="3" r=".8" fill="currentColor"/>',
+    ink: '<path d="M21 3c-3.5 1.5-8.5 6-10.5 9l2 2c3-2 7.5-7 8.5-11z"/><path d="M10.5 12C8 12 6.5 13.5 6.5 15.5c0 1.5-1 3-2.5 3.5 3 1.2 7.5.5 8.5-5"/>',
+    water: '<path d="M12 3c3.5 4.5 6 8 6 11a6 6 0 01-12 0c0-3 2.5-6.5 6-11z"/><path d="M9 14.5a3 3 0 003 3"/>',
+    crayon: '<path d="M14 4l6 6-9 9H5v-6z"/><path d="M11 7l6 6"/><path d="M5 19l3-3"/>',
+    oil: '<path d="M7 3h10v7H7z"/><path d="M9 10v3h6v-3"/><path d="M11 13h2v8h-2z"/><path d="M9 3v4M12 3v4M15 3v4"/>',
+    smudge: '<path d="M9 11V5a1.5 1.5 0 013 0v6"/><path d="M12 10V8.5a1.5 1.5 0 013 0V11"/><path d="M15 10.5a1.5 1.5 0 013 0V15c0 3.5-2.5 6-6 6-2.6 0-4.2-1.3-5.6-3.6L4.2 14.6a1.5 1.5 0 012.5-1.6L9 15.5"/>',
+    shade: '<path d="M16 3l5 5-9 9-5-5z"/><path d="M7 12l-3 9 9-3"/><circle cx="18.5" cy="18.5" r="3"/><path d="M18.5 15.5a3 3 0 010 6z" fill="currentColor"/>',
+  };
+  const BRUSH_GROUPS = [
+    ["펜", [
+      ["pen", "펜", "pen", { eng: "body" }, 3, 6, 100],
+      ["pen_g", "G펜", "pen", { eng: "body", press: true, pmin: 0.08, speed: true, taper: 4 }, 4, 8, 100],
+      ["pen_ball", "볼펜", "pen", { eng: "body", press: true, pmin: 0.6, grain: 0.12, tex: "fine" }, 2, 3, 95],
+      ["pen_fountain", "만년필", "ink", { eng: "body", press: true, pmin: 0.3, flat: 0.45, taper: 2 }, 4, 8, 100],
+      ["pen_sign", "사인펜", "marker", { eng: "body", feather: 0.25 }, 4, 8, 100],
+      ["pen_soft", "펜(부드러운)", "pen", { eng: "body", feather: 0.65 }, 5, 12, 100],
+      ["marker", "마커", "marker", { eng: "body" }, 9, 24, 50],
+      ["highlight", "형광펜", "hl", { eng: "body", cap: "butt", blend: "multiply" }, 10, 30, 60],
+    ]],
+    ["연필", [
+      ["pencil_h", "연필(경질)", "pencil", { eng: "pencil", dens: 0.7, dot: 1, press: true, pmin: 0.5 }, 3, 3, 75],
+      ["pencil", "연필", "pencil", { eng: "pencil", dens: 1.4, dot: 1.4 }, 3, 4, 90],
+      ["pencil_b", "연필(연질)", "pencil", { eng: "pencil", dens: 3, dot: 1.9, press: true, pmin: 0.5 }, 4, 6, 95],
+      ["pencil_color", "색연필", "crayon", { eng: "body", press: true, pmin: 0.45, grain: 0.55, tex: "fine", feather: 0.2 }, 4, 8, 90],
+    ]],
+    ["붓·잉크", [
+      ["brushpen", "붓펜", "ink", { eng: "body", press: true, pmin: 0.12, speed: true, taper: 3 }, 6, 12, 100],
+      ["sumi", "먹물 붓", "ink", { eng: "body", press: true, pmin: 0.15, speed: true, taper: 3, grain: 0.35, tex: "streak" }, 8, 20, 100],
+      ["ink", "캘리그라피", "ink", { eng: "ink", press: true, pmin: 0.22 }, 7, 12, 100],
+    ]],
+    ["에어브러시", [
+      ["air", "에어브러시(부드러운)", "air", { eng: "air" }, 14, 80, 60],
+      ["air_hard", "에어브러시(경질)", "air", { eng: "air", hard: true }, 14, 60, 70],
+      ["spray", "스프레이", "spray", { eng: "spray" }, 16, 80, 100],
+    ]],
+    ["수채화", [
+      ["water", "수채화(둥근붓)", "water", { eng: "body", press: true, pmin: 0.4, taper: 1.5, feather: 0.3, wet: 0.45, grain: 0.22, tex: "paper" }, 14, 40, 65],
+      ["water_flat", "수채화(평붓)", "water", { eng: "body", press: true, pmin: 0.5, flat: 0.22, feather: 0.2, wet: 0.4, grain: 0.22, tex: "paper" }, 14, 50, 65],
+      ["water_brush", "워터 브러시", "water", { eng: "body", press: true, pmin: 0.5, feather: 0.85, wet: 0.15, grain: 0.1, tex: "paper" }, 16, 60, 35],
+      ["water_bleed", "수채화(블리드)", "water", { eng: "body", press: true, pmin: 0.5, feather: 0.95, wet: 0.3, grain: 0.35, tex: "paper" }, 16, 60, 55],
+      ["water_dry", "수채화(마른붓)", "water", { eng: "body", press: true, pmin: 0.45, feather: 0.2, wet: 0.2, grain: 0.7, tex: "streak" }, 14, 40, 70],
+    ]],
+    ["크레용·파스텔·목탄", [
+      ["crayon", "크레용", "crayon", { eng: "body", press: true, pmin: 0.5, grain: 0.75, tex: "paper", feather: 0.15 }, 9, 20, 100],
+      ["pastel", "파스텔(부드러운)", "crayon", { eng: "body", press: true, pmin: 0.5, grain: 0.55, tex: "paper", feather: 0.7 }, 12, 30, 85],
+      ["charcoal", "목탄", "crayon", { eng: "body", press: true, pmin: 0.45, grain: 0.65, tex: "streak", feather: 0.3 }, 10, 24, 95],
+      ["charcoal_s", "목탄(연질)", "crayon", { eng: "body", press: true, pmin: 0.45, grain: 0.45, tex: "streak", feather: 0.7 }, 12, 32, 90],
+    ]],
+    ["유화·아크릴", [
+      ["oil", "유화", "oil", { eng: "oil", press: true, pmin: 0.5, body: 0.5 }, 14, 30, 100],
+      ["oil_flat", "유화(평붓)", "oil", { eng: "oil", press: true, pmin: 0.5, body: 0.5, flat: 0.3 }, 14, 36, 100],
+      ["acrylic", "아크릴", "oil", { eng: "oil", press: true, pmin: 0.55, body: 0.85 }, 14, 30, 100],
+    ]],
+    ["문지르기", [
+      ["smudge", "문지르기", "smudge", { eng: "smudge" }, 16, 40, 80],
+      ["smudge_soft", "문지르기(부드러운)", "smudge", { eng: "smudge", soft: true }, 16, 60, 60],
+    ]],
+    ["음영", [["shade", "음영 펜", "shade", { eng: "shade" }, 9, 40, 100]]],
   ];
-  const BRUSH_PREVIEW = { pen: 3, pencil: 3, marker: 9, air: 14, ink: 7, shade: 9 };
+  const BR = {};
+  BRUSH_GROUPS.forEach(([group, list]) => list.forEach(([k, n, ic, o, pv, sz, opc]) => {
+    const max = o.eng === "air" || o.eng === "spray" ? 300 : ["shade", "smudge", "oil"].includes(o.eng) || /^(water|crayon|pastel|charcoal)/.test(k) ? 200 : 150;
+    BR[k] = Object.assign({ k, n, ic: IC[ic], pv, sz, opc, max, group }, o);
+  }));
+  const brushOf = op => BR[op.brush] || BR.pen;
+  const isSmudge = op => op.kind === "stroke" && brushOf(op).eng === "smudge";
+  const BRUSHES = Object.values(BR).map(b => [b.k, b.n, b.ic]);
+  const BRUSH_PREVIEW = Object.fromEntries(Object.values(BR).map(b => [b.k, b.pv]));
   const PALETTE = ["#000000", "#4a4d55", "#9aa0aa", "#ffffff", "#e23b3b", "#ff7a2f", "#ffc531", "#ffe7a3", "#3fb950",
                    "#1f8a70", "#45b7e8", "#2f6fde", "#6a4be0", "#b44fd6", "#ff6fae", "#f2c1a0", "#8b5a3c", "#3a2a20"];
   const BLENDS = [["source-over", "보통"], ["multiply", "곱하기"], ["screen", "스크린"], ["overlay", "오버레이"], ["darken", "어둡게"],
@@ -377,8 +454,8 @@ input[type="range"] { accent-color: var(--accent); }
   /* ---------------- state ---------------- */
   const S = {
     tool: "brush", brush: "pen",
-    brushSize: { pen: 6, pencil: 4, marker: 24, air: 80, ink: 12, shade: 40 },
-    brushOpacity: { pen: 100, pencil: 90, marker: 50, air: 60, ink: 100, shade: 100 },
+    brushSize: Object.fromEntries(Object.values(BR).map(b => [b.k, b.sz])),
+    brushOpacity: Object.fromEntries(Object.values(BR).map(b => [b.k, b.opc])),
     shadeMode: "shadow", shadeStrength: 45, shadeHue: 35, shadeSoft: true,
     eraserSize: 40, eraserOpacity: 100, softEraser: false,
     smooth: 50, tol: 32, fillAll: true, fillOpacity: 100,
@@ -416,16 +493,161 @@ input[type="range"] { accent-color: var(--accent); }
 
   /* ---------------- brush engine ---------------- */
   function rng(seed) { let s = seed >>> 0 || 1; return () => { s ^= s << 13; s ^= s >>> 17; s ^= s << 5; return (s >>> 0) / 4294967296; }; }
-  function makeDab(color, size) {
+  function makeDab(color, size, hard) {
     const [c, x] = mk(), r = Math.max(1, size / 2);
     c.width = c.height = Math.ceil(r * 2);
     const [R, G, B] = hexToRgb(color), g = x.createRadialGradient(r, r, 0, r, r, r);
-    g.addColorStop(0, `rgba(${R},${G},${B},1)`); g.addColorStop(.5, `rgba(${R},${G},${B},.5)`); g.addColorStop(1, `rgba(${R},${G},${B},0)`);
+    g.addColorStop(0, `rgba(${R},${G},${B},1)`);
+    if (hard) g.addColorStop(.75, `rgba(${R},${G},${B},.85)`); else g.addColorStop(.5, `rgba(${R},${G},${B},.5)`);
+    g.addColorStop(1, `rgba(${R},${G},${B},0)`);
     x.fillStyle = g; x.fillRect(0, 0, c.width, c.height);
     return c;
   }
-  function strokeState(op) { return { i: 0, rem: 0, rand: rng(op.seed), dab: op.brush === "air" ? makeDab(op.eraser ? "#000000" : op.color, op.size) : null }; }
-  const widthAt = (op, pt) => op.pressure ? op.size * (0.22 + 0.78 * pt[2]) : op.size;
+  function strokeState(op) { const B = brushOf(op); return { i: 0, rem: 0, rand: rng(op.seed), dab: B.eng === "air" ? makeDab(op.eraser ? "#000000" : op.color, op.size, B.hard) : null }; }
+  const widthAt = (op, pt) => { if (!op.pressure) return op.size; const m = brushOf(op).pmin ?? 0.22; return op.size * (m + (1 - m) * pt[2]); };
+
+  // Paper textures for grainy brushes (crayon, charcoal, dry watercolour…): tiling noise, anchored to the paper so
+  // strokes laid over each other line up. Where it is opaque, the brush leaves a gap.
+  const grains = {};
+  function grainTex(tex) {
+    if (grains[tex]) return grains[tex];
+    const N = 256, [c, x] = mk(), img = x.createImageData(N, N), d = img.data, rnd = rng(tex === "streak" ? 77 : tex === "fine" ? 33 : 11);
+    const oct = tex === "streak" ? [[32, 2, 0.6], [8, 1, 0.4]] : tex === "fine" ? [[2, 2, 0.6], [1, 1, 0.4]] : [[8, 8, 0.5], [4, 4, 0.3], [2, 2, 0.2]];
+    const val = new Float32Array(N * N);
+    for (const [cw, ch, wt] of oct) {
+      const gw = N / cw, gh = N / ch, g = new Float32Array(gw * gh).map(() => rnd());
+      for (let y = 0; y < N; y++) for (let xx = 0; xx < N; xx++) {
+        const fx = xx / cw, fy = y / ch, x0 = Math.floor(fx), y0 = Math.floor(fy), tx = fx - x0, ty = fy - y0;
+        const at = (i, j) => g[((j + gh) % gh) * gw + ((i + gw) % gw)];
+        val[y * N + xx] += wt * ((at(x0, y0) * (1 - tx) + at(x0 + 1, y0) * tx) * (1 - ty) + (at(x0, y0 + 1) * (1 - tx) + at(x0 + 1, y0 + 1) * tx) * ty);
+      }
+    }
+    for (let i = 0; i < N * N; i++) { d[i * 4 + 3] = Math.round(255 * clamp((val[i] - 0.42) / 0.3, 0, 1)); }
+    c.width = c.height = N; x.putImageData(img, 0, 0);
+    return (grains[tex] = c);
+  }
+  // the smoothed path with the brush's width at each point (pressure, thin start, flat nib)
+  function bodyPoints(op) {
+    const B = brushOf(op), p = op.points, out = [];
+    if (p.length === 1) out.push(p[0]);
+    for (let i = 1; i < p.length; i++) { const seg = curveSegment(p, i); for (let k = i === 1 ? 0 : 1; k < seg.length; k++) out.push(seg[k]); }
+    let dist = 0; const ang = -Math.PI / 4;
+    return out.map((q, k) => {
+      if (k) dist += Math.hypot(q[0] - out[k - 1][0], q[1] - out[k - 1][1]);
+      let w = widthAt(op, q);
+      if (B.taper) w *= Math.min(1, 0.15 + 0.85 * dist / (op.size * B.taper));
+      if (B.flat) { const a = out[Math.max(0, k - 2)], b = out[Math.min(out.length - 1, k + 2)]; w *= B.flat + (1 - B.flat) * Math.abs(Math.sin(Math.atan2(b[1] - a[1], b[0] - a[0]) - ang)); }
+      return [q[0], q[1], w];
+    });
+  }
+  // The outline as one path: the centre line (to stroke) when the width never changes, otherwise the union of round
+  // dabs and the hulls between them, all wound the same way so overlaps never cancel out.
+  function bodyPath(pts, kw, X, m, varying) {
+    const path = new Path2D();
+    if (!varying) { pts.forEach((q, k) => k ? path.lineTo(X(q[0], m), q[1]) : path.moveTo(X(q[0], m), q[1])); return path; }
+    for (let k = 0; k < pts.length; k++) {
+      const b = pts[k], rb = Math.max(0.3, b[2] * kw / 2), bx = X(b[0], m);
+      path.moveTo(bx + rb, b[1]); path.arc(bx, b[1], rb, 0, Math.PI * 2);
+      if (!k) continue;
+      const a = pts[k - 1], ra = Math.max(0.3, a[2] * kw / 2), ax = X(a[0], m), dx = bx - ax, dy = b[1] - a[1], d = Math.hypot(dx, dy);
+      if (d <= Math.abs(ra - rb) + 0.01) continue;
+      const ux = dx / d, uy = dy / d, sn = (ra - rb) / d, cs = Math.sqrt(1 - sn * sn);
+      const n1x = ux * sn - uy * cs, n1y = uy * sn + ux * cs, n2x = ux * sn + uy * cs, n2y = uy * sn - ux * cs;
+      let q = [[ax + n1x * ra, a[1] + n1y * ra], [bx + n1x * rb, b[1] + n1y * rb], [bx + n2x * rb, b[1] + n2y * rb], [ax + n2x * ra, a[1] + n2y * ra]];
+      let area = 0; for (let i = 0; i < 4; i++) { const u = q[i], v = q[(i + 1) % 4]; area += u[0] * v[1] - v[0] * u[1]; }
+      if (area < 0) q = q.reverse();
+      path.moveTo(q[0][0], q[0][1]); path.lineTo(q[1][0], q[1][1]); path.lineTo(q[2][0], q[2][1]); path.lineTo(q[3][0], q[3][1]); path.closePath();
+    }
+    return path;
+  }
+  // body brushes: the whole stroke is drawn again each time (pieces drawn separately would overlap at the joints)
+  function drawBody(ctx, op, st, both, X) {
+    const B = brushOf(op), bb = strokeBox(op);
+    if (st.i > 0) ctx.clearRect(bb.x, bb.y, bb.w, bb.h);
+    const pts = bodyPoints(op), varying = !!(op.pressure || B.taper || B.flat) || pts.length === 1;
+    ctx.lineCap = B.cap || "round"; ctx.lineJoin = "round";
+    const paint = (kw, alpha, mode) => {
+      ctx.globalAlpha = alpha; ctx.globalCompositeOperation = mode || "source-over";
+      both(m => { const path = bodyPath(pts, kw, X, m, varying); if (varying) ctx.fill(path); else { ctx.lineWidth = Math.max(1, op.size * kw); ctx.stroke(path); } });
+    };
+    const f = B.feather || 0;
+    // soft edge: many slightly narrower layers (a step of at most about a pixel, so no rings show)
+    if (f) { const N = clamp(Math.round(op.size * f / 1.2), 3, 12), a = 1 - Math.pow(0.08, 1 / N); for (let j = 0; j < N; j++) paint(1 - f * j / N, a); paint(1 - f, 1); }
+    else { paint(1, 1); if (!varying && op.size < 3) paint(1, 1); } // a thin line covers no pixel fully; going over it again keeps its colour
+    if (B.wet) { // watercolour: paler inside, pigment gathers at the edge (the inside fades in softly)
+      const top = Math.max(0.25, (f ? 1 - f : 1) - 0.12), N = clamp(Math.round(op.size * 0.25 / 1.2), 3, 8), a = 1 - Math.pow(1 - B.wet, 1 / N);
+      for (let j = 0; j < N; j++) paint(top - 0.25 * j / N, a, "destination-out");
+    }
+    if (B.grain && bb.w > 0 && bb.h > 0) {
+      ctx.globalCompositeOperation = "destination-out"; ctx.globalAlpha = B.grain;
+      ctx.fillStyle = ctx.createPattern(grainTex(B.tex || "paper"), "repeat"); ctx.fillRect(bb.x, bb.y, bb.w, bb.h);
+    }
+    ctx.globalAlpha = 1; ctx.globalCompositeOperation = "source-over";
+    st.i = op.points.length;
+  }
+  // oil and acrylic: a body of paint with bristle streaks running along the stroke
+  function drawOil(ctx, op, st, both, X) {
+    const B = brushOf(op), bb = strokeBox(op);
+    if (st.i > 0) ctx.clearRect(bb.x, bb.y, bb.w, bb.h);
+    const pts = bodyPoints(op), rnd = rng(op.seed);
+    ctx.globalAlpha = B.body; both(m => ctx.fill(bodyPath(pts, 1, X, m, true)));
+    const K = clamp(Math.round(op.size / 2), 8, 24);
+    const offset = (o, m) => { const path = new Path2D();
+      pts.forEach((q, k) => {
+        const a = pts[Math.max(0, k - 1)], b = pts[Math.min(pts.length - 1, k + 1)];
+        let nx = -(b[1] - a[1]), ny = b[0] - a[0]; const L = Math.hypot(nx, ny) || 1; nx /= L; ny /= L;
+        const x = X(q[0] + nx * o * q[2], m), y = q[1] + ny * o * q[2];
+        k ? path.lineTo(x, y) : path.moveTo(x, y);
+      });
+      if (pts.length === 1) path.lineTo(X(pts[0][0], m) + 0.1, pts[0][1]);
+      return path; };
+    ctx.lineCap = "round"; ctx.lineJoin = "round";
+    for (let j = 0; j < K; j++) {
+      const o = ((j + 0.5) / K - 0.5) * 0.9 + (rnd() - 0.5) * 0.6 / K, a = 0.12 + rnd() * 0.5, lw = Math.max(1, op.size / K * (0.9 + rnd() * 1.4));
+      ctx.globalAlpha = a; ctx.lineWidth = lw; both(m => ctx.stroke(offset(o, m)));
+    }
+    // a little canvas texture
+    ctx.globalCompositeOperation = "destination-out"; ctx.globalAlpha = 0.18 * (1 - B.body * 0.5);
+    ctx.fillStyle = ctx.createPattern(grainTex("fine"), "repeat"); ctx.fillRect(bb.x, bb.y, bb.w, bb.h);
+    ctx.globalAlpha = 1; ctx.globalCompositeOperation = "source-over";
+    st.i = op.points.length;
+  }
+  // Smudge: picks up the colours under the brush and drags them along, mixing a little of each new spot into what it carries.
+  function smudgeAlong(ctx, op, st, pts) {
+    const B = brushOf(op), r = Math.max(1, op.size / 2), D = Math.ceil(r * 2), src = ctx.canvas;
+    if (!st.sm) {
+      const [c, x] = mk(), [t, tx] = mk(), [mc, mx] = mk(); c.width = c.height = t.width = t.height = mc.width = mc.height = D;
+      const g = mx.createRadialGradient(r, r, 0, r, r, r);
+      g.addColorStop(0, "rgba(0,0,0,1)"); g.addColorStop(B.soft ? 0.05 : 0.55, "rgba(0,0,0,1)"); g.addColorStop(1, "rgba(0,0,0,0)");
+      mx.fillStyle = g; mx.fillRect(0, 0, D, D);
+      st.sm = { c, x, t, tx, mask: mc, started: false };
+    }
+    const M = st.sm, k = clamp(op.opacity, 0.05, 1) * (B.soft ? 0.5 : 0.75), pick = B.soft ? 0.15 : 0.18;
+    const dab = (px, py) => {
+      const x0 = Math.round(px - r), y0 = Math.round(py - r);
+      if (!M.started) { M.x.clearRect(0, 0, D, D); M.x.drawImage(src, x0, y0, D, D, 0, 0, D, D); M.started = true; return; }
+      M.tx.globalCompositeOperation = "copy"; M.tx.drawImage(M.c, 0, 0);
+      M.tx.globalCompositeOperation = "destination-in"; M.tx.drawImage(M.mask, 0, 0);
+      // here = here × (1 − k·mask) + carried × k·mask
+      ctx.save();
+      ctx.globalAlpha = k; ctx.globalCompositeOperation = "destination-out"; ctx.drawImage(M.mask, x0, y0);
+      ctx.globalCompositeOperation = "lighter"; ctx.drawImage(M.t, x0, y0);
+      ctx.restore();
+      // carried = carried × (1 − pick) + here × pick
+      M.x.globalAlpha = pick; M.x.globalCompositeOperation = "destination-out"; M.x.fillRect(0, 0, D, D);
+      M.x.globalCompositeOperation = "lighter"; M.x.drawImage(src, x0, y0, D, D, 0, 0, D, D);
+      M.x.globalAlpha = 1; M.x.globalCompositeOperation = "source-over";
+    };
+    const sp = Math.max(1, r * 0.25);
+    if (pts.length === 1) { dab(pts[0][0], pts[0][1]); st.rem = sp; return; }
+    for (let q = 1; q < pts.length; q++) {
+      const a = pts[q - 1], b = pts[q], dx = b[0] - a[0], dy = b[1] - a[1], dist = Math.hypot(dx, dy);
+      if (!dist) continue;
+      let t = st.rem;
+      while (t <= dist) { dab(a[0] + dx * t / dist, a[1] + dy * t / dist); t += sp; }
+      st.rem = t - dist;
+    }
+  }
 
   // Points along the smoothed path for input point i: a quadratic curve through the midpoints of neighbouring
   // input points, so strokes stay round even when the device reports few points (iPad Safari, fast flicks).
@@ -464,24 +686,13 @@ input[type="range"] { accent-color: var(--accent); }
         ctx.beginPath(); ctx.arc(X(b[0], m), b[1], Math.max(0.3, rb), 0, Math.PI * 2); ctx.fill();
       });
     };
-    // Plain pen and marker: the whole stroke is one path. Stroking it piece by piece made the soft edges of the pieces
-    // overlap at every joint, which shows as a beaded, bumpy edge when zoomed in. Continuing a stroke redraws it whole.
-    if ((op.brush === "pen" && !op.pressure) || op.brush === "marker") {
-      if (st.i < p.length) {
-        if (st.i > 0) { const bb = strokeBox(op); ctx.clearRect(bb.x, bb.y, bb.w, bb.h); }
-        const lw = op.brush === "marker" ? op.size : widthAt(op, p[0]);
-        if (p.length === 1) dot(p[0][0], p[0][1], lw / 2);
-        else {
-          ctx.lineWidth = Math.max(1, lw);
-          const passes = lw < 3 ? 2 : 1; // a thin line covers no pixel fully; going over it again keeps its full colour
-          both(m => {
-            ctx.beginPath(); ctx.moveTo(X(p[0][0], m), p[0][1]);
-            for (let i = 1; i < p.length; i++) { const pts = curveSegment(p, i); for (let k = 1; k < pts.length; k++) ctx.lineTo(X(pts[k][0], m), pts[k][1]); }
-            for (let q = 0; q < passes; q++) ctx.stroke();
-          });
-        }
-        st.i = p.length;
-      }
+    const B = brushOf(op);
+    if (B.eng === "smudge") {
+      for (; st.i < p.length; st.i++) smudgeAlong(ctx, op, st, st.i === 0 ? [p[0]] : curveSegment(p, st.i));
+      ctx.restore(); return;
+    }
+    if (B.eng === "body" || B.eng === "oil") {
+      if (st.i < p.length) (B.eng === "oil" ? drawOil : drawBody)(ctx, op, st, both, X);
       ctx.restore(); return;
     }
     for (; st.i < p.length; st.i++) {
@@ -520,22 +731,32 @@ input[type="range"] { accent-color: var(--accent); }
   }
   // stamped brushes (pencil grain, airbrush): dabs spaced evenly along the given path points
   function stampAlong(ctx, op, st, pts, both, X) {
+    const B = brushOf(op);
     const stamp = (x, y, w) => {
-      if (op.brush === "air") {
+      // each dab has its own random pattern, so the live preview and the finished stroke scatter exactly the same
+      const rand = rng((op.seed ^ Math.imul((st.n = (st.n || 0) + 1), 2654435761)) >>> 0);
+      if (B.eng === "air") {
         const d = st.dab, s = w / op.size;
-        ctx.globalAlpha = 0.14;
+        ctx.globalAlpha = B.hard ? 0.22 : 0.14;
         both(m => ctx.drawImage(d, X(x, m) - d.width * s / 2, y - d.height * s / 2, d.width * s, d.height * s));
         ctx.globalAlpha = 1;
-      } else {
-        const r = w / 2, n = Math.max(2, Math.ceil(r * r * 1.4));
+      } else if (B.eng === "spray") {
+        const r = w / 2, n = Math.max(3, Math.ceil(r * 0.9)), big = Math.max(1, op.size * 0.025);
         for (let k = 0; k < n; k++) {
-          const ang = st.rand() * Math.PI * 2, rr = Math.sqrt(st.rand()) * r, px = x + Math.cos(ang) * rr, py = y + Math.sin(ang) * rr;
-          const sz = st.rand() < 0.5 ? 1 : 1.4;
+          const ang = rand() * Math.PI * 2, rr = Math.sqrt(rand()) * r, px = x + Math.cos(ang) * rr, py = y + Math.sin(ang) * rr;
+          const sz = 0.8 + rand() * big;
+          both(m => ctx.fillRect(X(px, m) - sz / 2, py - sz / 2, sz, sz));
+        }
+      } else {
+        const r = w / 2, n = Math.max(2, Math.ceil(r * r * (B.dens || 1.4)));
+        for (let k = 0; k < n; k++) {
+          const ang = rand() * Math.PI * 2, rr = Math.sqrt(rand()) * r, px = x + Math.cos(ang) * rr, py = y + Math.sin(ang) * rr;
+          const sz = rand() < 0.5 ? 1 : (B.dot || 1.4);
           both(m => ctx.fillRect(X(px, m), py, sz, sz));
         }
       }
     };
-    const spacingOf = w => op.brush === "air" ? Math.max(1, w * 0.12) : Math.max(1, w * 0.35);
+    const spacingOf = w => B.eng === "air" ? Math.max(1, w * 0.12) : B.eng === "spray" ? Math.max(1, w * 0.25) : Math.max(1, w * 0.35);
     if (pts.length === 1) { const w = widthAt(op, pts[0]); stamp(pts[0][0], pts[0][1], w); st.rem = spacingOf(w); return; }
     for (let k = 1; k < pts.length; k++) {
       const a = pts[k - 1], b = pts[k], dx = b[0] - a[0], dy = b[1] - a[1], dist = Math.hypot(dx, dy);
@@ -558,7 +779,7 @@ input[type="range"] { accent-color: var(--accent); }
   }
   function blitStroke(c, buf, op, bb) {
     if (bb && (bb.w <= 0 || bb.h <= 0)) return;
-    c.save(); c.globalAlpha = op.opacity; c.globalCompositeOperation = op.eraser ? "destination-out" : "source-over";
+    c.save(); c.globalAlpha = op.opacity; c.globalCompositeOperation = op.eraser ? "destination-out" : brushOf(op).blend || "source-over";
     if (bb) c.drawImage(buf, bb.x, bb.y, bb.w, bb.h, bb.x, bb.y, bb.w, bb.h); else c.drawImage(buf, 0, 0);
     c.restore();
   }
@@ -652,7 +873,7 @@ input[type="range"] { accent-color: var(--accent); }
     for (const o of l.ops) {
       if (o.kind === "move") { list.forEach(m => { m.x += o.dx; m.y += o.dy; }); grp = null; }
       else if (o.shade && o.mask && o.mode) { list.push({ img: o.mask, x: o.x, y: o.y, mode: o.mode }); grp = null; }
-      else if (list.length && !o.shade && !o.eraser && o.kind !== "lasso") {
+      else if (list.length && !o.shade && !o.eraser && o.kind !== "lasso" && !isSmudge(o)) {
         if (!grp) { const [c, x] = mk(CPU); c.width = doc.w; c.height = doc.h; grp = { img: c, cx: x, x: 0, y: 0, cover: true }; list.push(grp); }
         renderOp(grp.cx, o);
       }
@@ -748,6 +969,7 @@ input[type="range"] { accent-color: var(--accent); }
     } else { c.moveTo(x1, y1); c.lineTo(x2, y2); }
   }
   function renderOp(c, op) {
+    if (isSmudge(op)) { drawStroke(c, op, strokeState(op)); return; } // works on the layer's own pixels
     if (op.kind === "stroke") {
       const bb = strokeBox(op);
       if (bb.w <= 0 || bb.h <= 0) return;
@@ -849,7 +1071,7 @@ input[type="range"] { accent-color: var(--accent); }
           else it.m = t.multiply(it.m);
         }
         items.push(...add);
-      } else if (!op.eraser && !op.shade && opPoints(op)) items.push({ op, m: new DOMMatrix(), key: String(i) });
+      } else if (!op.eraser && !op.shade && !isSmudge(op) && opPoints(op)) items.push({ op, m: new DOMMatrix(), key: String(i) });
     });
     return items.filter(it => !it.gone);
   }
@@ -864,9 +1086,9 @@ input[type="range"] { accent-color: var(--accent); }
       const op = it.op;
       mx.save(); mx.setTransform(it.m);
       // a slightly wider copy of the stroke, so its soft edge comes along whole
-      const grow = op.kind === "stroke" ? (op.brush === "air" ? 4 : 3) : op.kind === "shape" ? 3 : 0;
+      const grow = op.kind === "stroke" ? (brushOf(op).eng === "air" || brushOf(op).eng === "spray" ? 4 : 3) : op.kind === "shape" ? 3 : 0;
       const ghost = Object.assign({}, op, { color: "#000000", opacity: 1, eraser: false, size: op.size + grow });
-      if (op.kind === "stroke") { if (op.brush === "air" || op.brush === "pencil") ghost.brush = "pen"; drawStroke(mx, ghost, strokeState(ghost)); }
+      if (op.kind === "stroke") { if (op.brush !== "ink") ghost.brush = "pen"; drawStroke(mx, ghost, strokeState(ghost)); }
       else renderOp(mx, ghost);
       mx.restore();
     }
@@ -986,12 +1208,12 @@ input[type="range"] { accent-color: var(--accent); }
   // exactly what gets added when the pen lifts, so nothing new appears at the end.
   function liveStrokeBuf(box) {
     const g = gesture;
-    if (!live || live.shade || !g || g.type !== "stroke" || !g.raw || !live.op.points.length) return lbuf;
+    if (!live || live.shade || live.smudge || !g || g.type !== "stroke" || !g.raw || !live.op.points.length) return lbuf;
     const op = live.op, end = [g.raw.x, g.raw.y, g.p];
     tailCtx.clearRect(box.x, box.y, box.w, box.h);
     tailCtx.drawImage(lbuf, box.x, box.y, box.w, box.h, box.x, box.y, box.w, box.h);
     const tail = Object.assign({}, op, { points: op.points.concat([end, end.slice()]) });
-    drawStroke(tailCtx, tail, { i: live.st.i, rem: live.st.rem, rand: rng(op.seed + live.st.i), dab: live.st.dab });
+    drawStroke(tailCtx, tail, { i: live.st.i, rem: live.st.rem, n: live.st.n, rand: rng(op.seed + live.st.i), dab: live.st.dab });
     return tailCv;
   }
   // Recomposites the document. While a stroke is being drawn only the box around the newest part is redone (box),
@@ -1173,7 +1395,7 @@ input[type="range"] { accent-color: var(--accent); }
              bind() { const i = $(id); i.addEventListener("input", () => { on(+i.value); $(id + "-out").textContent = fmt(+i.value); }); } };
   }
   // Size slider on a curve: most of the track is spent on small sizes, where a few pixels make a visible difference.
-  const SIZE_MAX = { pen: 150, pencil: 150, marker: 150, ink: 150, air: 300, shade: 200 };
+  const SIZE_MAX = Object.fromEntries(Object.values(BR).map(b => [b.k, b.max]));
   const SIZE_CURVE = 2.2;
   const sizeToPos = (v, min, max) => Math.round(1000 * Math.pow(clamp((v - min) / (max - min), 0, 1), 1 / SIZE_CURVE));
   const posToSize = (t, min, max) => Math.round(min + (max - min) * Math.pow(t / 1000, SIZE_CURVE));
@@ -1190,22 +1412,22 @@ input[type="range"] { accent-color: var(--accent); }
   function closeBrushMenu() { brushMenu.hidden = true; const b = brushToolBtn(); if (b) b.setAttribute("aria-expanded", "false"); }
   function toggleBrushMenu() {
     if (!brushMenu.hidden) return closeBrushMenu();
-    brushMenu.innerHTML = BRUSHES.map(([k, n, ic]) =>
-      `<button role="option" data-k="${k}" aria-selected="${k === S.brush}">${svg(ic)}<canvas width="104" height="44" data-preview="${k}"></canvas><span>${n}</span></button>`).join("");
+    brushMenu.innerHTML = BRUSH_GROUPS.map(([g, list]) => `<div class="mgroup">${g}</div><div class="mgrid">` + list.map(([k, n]) =>
+      `<button role="option" data-k="${k}" aria-selected="${k === S.brush}"><canvas width="128" height="40" data-preview="${k}"></canvas><span>${n}</span></button>`).join("") + "</div>").join("");
     brushMenu.querySelectorAll("button").forEach(b => b.onclick = () => { S.brush = b.dataset.k; closeBrushMenu(); updateBrushToolIcon(); renderOptions(); });
     const anchor = brushToolBtn(), r = anchor.getBoundingClientRect();
     brushMenu.hidden = false;
     const mh = brushMenu.offsetHeight;
-    if (r.right + 236 <= innerWidth && r.height >= r.width * 0.8 && r.top < innerHeight - 80 && r.left < 120) {
+    if (r.right + 328 <= innerWidth && r.height >= r.width * 0.8 && r.top < innerHeight - 80 && r.left < 120) {
       // tool rail on the left: open beside the button
       brushMenu.style.left = r.right + 8 + "px"; brushMenu.style.top = Math.max(8, Math.min(r.top, innerHeight - mh - 8)) + "px";
     } else {
       // tool rail along the bottom (phones): open above the button
-      brushMenu.style.left = Math.max(8, Math.min(r.left, innerWidth - 228)) + "px"; brushMenu.style.top = Math.max(8, r.top - mh - 8) + "px";
+      brushMenu.style.left = Math.max(8, Math.min(r.left, innerWidth - 320)) + "px"; brushMenu.style.top = Math.max(8, r.top - mh - 8) + "px";
     }
     anchor.setAttribute("aria-expanded", "true");
     drawBrushPreviews();
-    brushMenu.querySelector('[aria-selected="true"]').focus();
+    const cur = brushMenu.querySelector('[aria-selected="true"]'); if (cur) { cur.focus(); cur.scrollIntoView({ block: "nearest" }); }
   }
   document.addEventListener("pointerdown", e => {
     if (brushMenu.hidden || brushMenu.contains(e.target) || e.target.closest('#rail .tool[data-tool="brush"]')) return;
@@ -1218,7 +1440,15 @@ input[type="range"] { accent-color: var(--accent); }
       const k = cv.dataset.preview, c = cv.getContext("2d"), [b, bx] = mk();
       b.width = cv.width; b.height = cv.height;
       const pts = [];
-      for (let i = 0; i <= 40; i++) { const t = i / 40; pts.push([10 + t * 84, 22 + Math.sin(t * Math.PI * 2) * 9, 0.35 + 0.65 * Math.sin(t * Math.PI)]); }
+      for (let i = 0; i <= 40; i++) { const t = i / 40; pts.push([12 + t * cv.width * 0.8, cv.height / 2 + Math.sin(t * Math.PI * 2) * cv.height * 0.22, 0.35 + 0.65 * Math.sin(t * Math.PI)]); }
+      if (BR[k].eng === "smudge") {
+        // colour bands with a smudge across them
+        const W = cv.width, H = cv.height;
+        ["#e2475b", "#ffc531", "#45b7e8", "#3fb950"].forEach((col, i) => { c.fillStyle = col; c.fillRect(Math.floor(i * W / 4), 0, Math.ceil(W / 4), H); });
+        const op = { kind: "stroke", brush: k, size: BRUSH_PREVIEW[k] * 2, opacity: S.brushOpacity[k] / 100, seed: 7, mirror: 0, points: pts.map(q => [q[0], q[1], 0.5]) };
+        drawStroke(c, op, strokeState(op));
+        return;
+      }
       if (k === "shade") {
         // three colour bands with a shaded stroke across them
         const W = cv.width, H = cv.height, bands = ["#e2475b", "#ffc531", "#45b7e8"];
@@ -1234,10 +1464,11 @@ input[type="range"] { accent-color: var(--accent); }
         c.putImageData(base, 0, 0);
         return;
       }
-      const op = { brush: k, color: S.color, size: BRUSH_PREVIEW[k] * 2, pressure: k === "ink", seed: 7, mirror: 0, points: pts };
+      const op = { brush: k, color: S.color, size: BRUSH_PREVIEW[k] * 2, pressure: !!(BR[k].press || BR[k].speed), seed: 7, mirror: 0, points: pts };
       drawStroke(bx, op, strokeState(op));
       c.clearRect(0, 0, cv.width, cv.height);
-      c.globalAlpha = S.brushOpacity[k] / 100; c.drawImage(b, 0, 0); c.globalAlpha = 1;
+      c.globalAlpha = S.brushOpacity[k] / 100; c.globalCompositeOperation = BR[k].blend || "source-over"; c.drawImage(b, 0, 0);
+      c.globalAlpha = 1; c.globalCompositeOperation = "source-over";
     });
   }
   const hint = t => ({ html: `<span class="hint">${t}</span>`, bind() {} });
@@ -1253,7 +1484,7 @@ input[type="range"] { accent-color: var(--accent); }
         parts.push(seg("o-ssoft", [["soft", "부드럽게"], ["hard", "선명하게"]], S.shadeSoft ? "soft" : "hard", k => S.shadeSoft = k === "soft"));
       }
       parts.push(sizeSlider("굵기", 1, SIZE_MAX[b], S.brushSize[b], v => { S.brushSize[S.brush] = v; requestRender(); }));
-      parts.push(slider("o-op", "불투명도", 1, 100, S.brushOpacity[b], pct, v => { S.brushOpacity[S.brush] = v; drawBrushPreviews(); }));
+      parts.push(slider("o-op", BR[b].eng === "smudge" ? "세기" : "불투명도", 1, 100, S.brushOpacity[b], pct, v => { S.brushOpacity[S.brush] = v; drawBrushPreviews(); }));
       parts.push(slider("o-sm", "손떨림 보정", 0, 100, S.smooth, pct, v => S.smooth = v));
     } else if (t === "eraser") {
       parts.push(seg("o-soft", [["hard", "딱딱한 지우개"], ["soft", "부드러운 지우개"]], S.softEraser ? "soft" : "hard", k => S.softEraser = k === "soft"));
@@ -1318,6 +1549,7 @@ input[type="range"] { accent-color: var(--accent); }
   // the brush tool button shows the kind of brush in use, with a small corner mark meaning "tap again for more"
   function updateBrushToolIcon() {
     const b = brushToolBtn(); if (!b) return;
+    if (!BR[S.brush]) S.brush = "pen";
     const [k, n, ic] = BRUSHES.find(x => x[0] === S.brush);
     b.innerHTML = svg(ic) + '<i class="more"></i>'; b.title = `브러시: ${n} (B, 한 번 더 누르면 종류 고르기)`; b.setAttribute("aria-label", `브러시: ${n}`);
   }
@@ -1585,7 +1817,9 @@ input[type="range"] { accent-color: var(--accent); }
 
   /* ---------------- pointer input ---------------- */
   const pointers = new Map();
-  function cancelLive() { live = null; gesture = null; lassoDraft = null; requestRender(true); }
+  function cancelLive() {
+    if (live && live.smudge) { const c = live.layer.cx; c.save(); c.globalCompositeOperation = "copy"; c.drawImage(live.snap, 0, 0); c.restore(); }
+    live = null; gesture = null; lassoDraft = null; requestRender(true); }
   function needVisible(l) { if (!l.visible) { toast("숨긴 레이어예요. 눈 아이콘을 눌러 보이게 한 뒤 그려 주세요."); return false; } return true; }
 
   // Pen mode: only a stylus (or mouse) draws. Two fingers move and zoom the paper (one alone does nothing), and any finger or palm
@@ -1658,8 +1892,9 @@ input[type="range"] { accent-color: var(--accent); }
       const op = {
         kind: "stroke", brush: er ? (S.softEraser ? "air" : "pen") : S.brush, eraser: er, color: S.color,
         size: (er ? S.eraserSize : S.brushSize[S.brush]) * sizeScale(), opacity: (er ? S.eraserOpacity : S.brushOpacity[S.brush]) / 100,
-        pressure: e.pointerType === "pen" && S.brush === "ink" && !er, seed: (Math.random() * 2 ** 31) | 0, mirror: S.sym ? doc.w : 0,
-        points: [[d.x, d.y, e.pointerType === "pen" ? Math.max(0.2, e.pressure || 0.5) : 0.5]],
+        pressure: !er && (BR[S.brush].speed || (e.pointerType === "pen" && !!BR[S.brush].press)), seed: (Math.random() * 2 ** 31) | 0,
+        mirror: S.sym && !(BR[S.brush].eng === "smudge" && !er) ? doc.w : 0,
+        points: [[d.x, d.y, e.pointerType === "pen" ? Math.max(0.2, e.pressure || 0.5) : 0.6]],
       };
       lctx.clearRect(0, 0, doc.w, doc.h);
       if (op.brush === "shade") {
@@ -1669,11 +1904,17 @@ input[type="range"] { accent-color: var(--accent); }
         live = { kind: "stroke", layer: l, op, st: strokeState(maskOp),
                  shade: { maskOp, sample: sampleWithoutShading(), had: shadeCoverage(S.shadeMode), reach: new Uint8Array(doc.w * doc.h), mode: S.shadeMode, k: S.shadeStrength / 100, hs: S.shadeHue / 100, soft: S.shadeSoft, cache: new Map() } };
         shadeSegment(live);
+      } else if (isSmudge(op)) {
+        // smudging works right on the layer; keep a copy so the finished stroke can be replayed exactly (and cancelled)
+        const [snap, sx] = mk(); snap.width = doc.w; snap.height = doc.h; sx.drawImage(l.cv, 0, 0);
+        const st = strokeState(op); drawStroke(l.cx, op, st);
+        live = { kind: "stroke", layer: l, op, st, smudge: true, snap };
       } else {
         const st = strokeState(op); drawStroke(lctx, op, st);
         live = { kind: "stroke", layer: l, op, st };
       }
-      gesture = { type: "stroke", last: d, lazy: d, p: op.points[0][2] };
+      // brush pens on a finger or mouse: faster strokes get thinner, like a real brush
+      gesture = { type: "stroke", last: d, lazy: d, p: op.points[0][2], speedP: !er && !!BR[S.brush].speed && e.pointerType !== "pen" };
     } else if (tool === "shape") {
       live = { kind: "op", layer: l, op: { kind: "shape", shape: S.shape, filled: S.shapeFill, color: S.color, size: S.shapeSize * sizeScale(), opacity: S.shapeOpacity / 100, x1: d.x, y1: d.y, x2: d.x, y2: d.y } };
       gesture = { type: "shape" };
@@ -1726,11 +1967,12 @@ input[type="range"] { accent-color: var(--accent); }
         const nx = last.x + (g.lazy.x - last.x) * ease, ny = last.y + (g.lazy.y - last.y) * ease;
         if (Math.hypot(nx - last.x, ny - last.y) < 0.4) continue;
         g.last = { x: nx, y: ny };
-        g.p += ((ev.pressure || 0.5) - g.p) * 0.3; // Apple Pencil pressure jumps between reports; ease it so the width doesn't wobble
+        if (g.speedP) g.p += (clamp(1.15 - Math.hypot(r0.x - hl[0], r0.y - hl[1]) * V.z / 22, 0.25, 1) - g.p) * 0.2;
+        else g.p += ((ev.pressure || 0.5) - g.p) * 0.3; // Apple Pencil pressure jumps between reports; ease it so the width doesn't wobble
         op.points.push([nx, ny, g.p]);
       }
       g.raw = d;
-      if (!live.shade) drawStroke(lctx, op, live.st); // shading is processed once per frame in renderDoc
+      if (!live.shade) drawStroke(live.smudge ? live.layer.cx : lctx, op, live.st); // shading is processed once per frame in renderDoc
       // only the stretch of stroke that changed needs recompositing
       let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
       const tipPts = [g.raw, g.prevRaw].filter(Boolean).map(q => [q.x, q.y]);
@@ -1808,7 +2050,10 @@ input[type="range"] { accent-color: var(--accent); }
           mx.putImageData(md, 0, 0);
           addOp(L.layer, { kind: "fill", shade: true, mode: L.shade.mode, mask, img, x: bb.x, y: bb.y, opacity: L.op.opacity });
         } else requestRender(true);
-      } else addOp(L.layer, L.op);
+      } else {
+        if (L.smudge) { const c = L.layer.cx; c.save(); c.globalCompositeOperation = "copy"; c.drawImage(L.snap, 0, 0); c.restore(); } // replayed by addOp
+        addOp(L.layer, L.op);
+      }
     } else if (L.kind === "move") {
       if (L.dx || L.dy) addOp(L.layer, { kind: "move", dx: L.dx, dy: L.dy }); else requestRender(true);
     } else if (L.op.kind === "shape") {
