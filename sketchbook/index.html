@@ -1914,7 +1914,10 @@ input[type="range"] { accent-color: var(--accent); }
         live = { kind: "stroke", layer: l, op, st };
       }
       // brush pens on a finger or mouse: faster strokes get thinner, like a real brush
-      gesture = { type: "stroke", last: d, lazy: d, p: op.points[0][2], speedP: !er && !!BR[S.brush].speed && e.pointerType !== "pen" };
+      // brush pens get thinner the faster they move, like a real brush (with the Pencil on top of its pressure)
+      const sp = !er && !!BR[S.brush].speed, pen = e.pointerType === "pen";
+      if (sp) op.points[0][2] = pen ? op.points[0][2] : 1;
+      gesture = { type: "stroke", last: d, lazy: d, p: op.points[0][2], speed: sp, pen, pr: op.points[0][2], sf: 1, t: e.timeStamp };
     } else if (tool === "shape") {
       live = { kind: "op", layer: l, op: { kind: "shape", shape: S.shape, filled: S.shapeFill, color: S.color, size: S.shapeSize * sizeScale(), opacity: S.shapeOpacity / 100, x1: d.x, y1: d.y, x2: d.x, y2: d.y } };
       gesture = { type: "shape" };
@@ -1967,8 +1970,14 @@ input[type="range"] { accent-color: var(--accent); }
         const nx = last.x + (g.lazy.x - last.x) * ease, ny = last.y + (g.lazy.y - last.y) * ease;
         if (Math.hypot(nx - last.x, ny - last.y) < 0.4) continue;
         g.last = { x: nx, y: ny };
-        if (g.speedP) g.p += (clamp(1.15 - Math.hypot(r0.x - hl[0], r0.y - hl[1]) * V.z / 22, 0.25, 1) - g.p) * 0.2;
-        else g.p += ((ev.pressure || 0.5) - g.p) * 0.3; // Apple Pencil pressure jumps between reports; ease it so the width doesn't wobble
+        g.pr += ((g.pen ? ev.pressure || 0.5 : g.speed ? 1 : 0.5) - g.pr) * 0.3; // Apple Pencil pressure jumps between reports; ease it so the width doesn't wobble
+        if (g.speed) {
+          // speed in screen pixels per millisecond: slow (under ~0.2) ≈ full width, fast (1.1 and up) ≈ a third
+          const dt = Math.max(4, (ev.timeStamp || 0) - g.t), v = Math.hypot(r0.x - hl[0], r0.y - hl[1]) * V.z / dt;
+          g.t = ev.timeStamp || g.t + dt;
+          g.sf += (clamp(1.05 - 0.7 * v, 0.3, 1) - g.sf) * 0.25;
+          g.p = g.pr * g.sf;
+        } else g.p = g.pr;
         op.points.push([nx, ny, g.p]);
       }
       g.raw = d;
